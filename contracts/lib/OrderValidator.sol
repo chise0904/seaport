@@ -149,6 +149,8 @@ contract OrderValidator is Executor, ZoneInteraction {
         }
 
         // Retrieve current counter & use it w/ parameters to derive order hash.
+        // 1. 確認 Consideration Array 的 length 是夠的
+        // 2. 計算 order hash 並返回
         orderHash = _assertConsiderationLengthAndGetOrderHash(orderParameters);
 
         // Ensure restricted orders have a valid submitter or pass a zone check.
@@ -194,44 +196,115 @@ contract OrderValidator is Executor, ZoneInteraction {
 
         // If order (orderStatus) currently has a non-zero denominator it is
         // partially filled.
+        // filledDenominator != 0 表示這個 order 被 partially filled.
         if (filledDenominator != 0) {
             // If denominator of 1 supplied, fill all remaining amount on order.
+            // denominator 為 1, 就可以代表是全要全部的nft了
+            // 因為不會有 2/1 這種情況
             if (denominator == 1) {
                 // Scale numerator & denominator to match current denominator.
+                // 因為要全買, 所以就是填入總額 filledDenominator
                 numerator = filledDenominator;
                 denominator = filledDenominator;
             }
             // Otherwise, if supplied denominator differs from current one...
+            //                               1   (numerator)
+            // 假設這次要 partial fulfill 是  ---
+            //                               3   (denominator)
+            //                                   2  (filledNumerator)
+            // 而之前已經被 partial fulfilled 了  ---
+            //                                   5  (filledDenominator)
+            // 那我們要怎麼算?
+            // 首先得讓分母相同, 才有辦法運算
+            // 所以
+            //
+            //  2          6        filledNumerator = filledNumerator * denominator
+            // ---  --->  ----  即    
+            //  5          15       filledDenominator = filledDenominator * denominator
+            //
+            // 另一部分
+            //
+            //  1            5        numerator = numerator * filledDenominator
+            // ---   --->   ---  即
+            //  3            15       denominator = denominator * filledDenominator
             else if (filledDenominator != denominator) {
+                // 參考上面的說明
                 // scale current numerator by the supplied denominator, then...
+                //  2          6        filledNumerator = filledNumerator * denominator
+                // ---  --->  ----  即    
+                //  5          15       filledDenominator = filledDenominator * denominator
                 filledNumerator *= denominator;
+                // 這邊只有算 filledNumerator 卻沒有算 filledDenominator
+                // 是因為沒必要, 因為 filledDenominator 會等於 denominator
 
                 // the supplied numerator & denominator by current denominator.
+                //  1            5        numerator = numerator * filledDenominator
+                // ---   --->   ---  即
+                //  3            15       denominator = denominator * filledDenominator
                 numerator *= filledDenominator;
                 denominator *= filledDenominator;
             }
 
+            // 這邊還沒搞懂 ????
             // Once adjusted, if current+supplied numerator exceeds denominator:
+            //  1          6        numerator * filledDenominator
+            // ---  --->  ---  即
+            //  2          12       denominator * filledDenominator
+            //
+            // 另一部分
+            //  
+            //  4          8        filledNumerator * denominator
+            // ---  --->  ----  即    
+            //  6          12       filledDenominator * denominator
+            //
+            // 這樣 filledNumerator + numerator = 6 + 8 = 14 就大於 denominator (15)
+            // 等等會將要買的nft跟已買的nft的分子部分相加, 所以這邊先檢查是否會超過分母
             if (filledNumerator + numerator > denominator) {
                 // Skip underflow check: denominator >= orderStatus.numerator
                 unchecked {
                     // Reduce current numerator so it + supplied = denominator.
+                    // filledNumerator - denominator 就是剩下還沒有被買的 nft 數量
                     numerator = denominator - filledNumerator;
                 }
             }
 
             // Increment the filled numerator by the new numerator.
+            // 把 這次要買的數量 加到 已買的數量 裡
             filledNumerator += numerator;
 
             // Use assembly to ensure fractional amounts are below max uint120.
             assembly {
                 // Check filledNumerator and denominator for uint120 overflow.
+                // 這邊是檢查 filledNumerator 和 denominator 有沒有 uint120 overflow.
+                // 超過的話, 就對分母和分子同時除以gcd, 將數字變小
                 if or(
                     gt(filledNumerator, MaxUint120),
                     gt(denominator, MaxUint120)
                 ) {
                     // Derive greatest common divisor using euclidean algorithm.
+                    // for ( uint i = 0; i < n; i++ ) {
+                    //     value = 2 * value;
+                    // }
+                    // 寫成 assembly 就是
+                    // for { let i := 0 } lt(i, n) { i := add(i, 1) } { 
+                    //     value := mul(2, value) 
+                    // }
+                    // 不過 我們不需要 { let i := 0 } 
+                    // 不需要 lt(i, n) 
+                    // 不需要 { i := add(i, 1) }
+                    // 所以我們會想要全部留空, 
+                    // 即 
+                    // for { }  { } { 
+                    //     // ....
+                    // }
+                    // 但這樣會出錯 ParserError: Literal or identifier expected
+                    // 因為 for { }  { } 中的這兩個 {} 之間不能是空的
+                    // 所以下面才會寫
+                    // for { } _b { } { 
+                    //     // ....
+                    // }
                     function gcd(_a, _b) -> out {
+                        // 這邊是求解gcd的歐幾里德演算法
                         for {
 
                         } _b {
@@ -243,6 +316,17 @@ contract OrderValidator is Executor, ZoneInteraction {
                         }
                         out := _a
                     }
+                    // 這邊要求 numerator, denominator, filledNumerator 的 gcd
+                    // 
+                    // filledNumerator 和 denominator 最後都會填入 orderStatus
+                    // 當 filledNumerator 和 denominator 發生 uint120 overflow
+                    // 求出 filledNumerator 和 denominator 的 gcd
+                    // 就可以同時對 filledNumerator 和 denominator 除以 gcd
+                    // 即
+                    //   filledNumerator        denominator
+                    // ------------------ 和 ------------------
+                    //        gcd                  gcd
+                    // 如此一來, 就把大數字變小了, 並且比例維持一樣
                     let scaleDown := gcd(
                         numerator,
                         gcd(filledNumerator, denominator)
@@ -252,7 +336,8 @@ contract OrderValidator is Executor, ZoneInteraction {
                     let safeScaleDown := add(scaleDown, iszero(scaleDown))
 
                     // Scale all fractional values down by gcd.
-                    numerator := div(numerator, safeScaleDown)
+                    // 全部都等比例變小, 等等還要返回 numerator 和 denominator
+                    numerator := div(numerator, safeScaleDown) 
                     filledNumerator := div(filledNumerator, safeScaleDown)
                     denominator := div(denominator, safeScaleDown)
 

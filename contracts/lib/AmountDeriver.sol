@@ -106,6 +106,7 @@ contract AmountDeriver is AmountDerivationErrors {
      *
      * @return newValue The value after applying the fraction.
      */
+     // _getFraction(numerator, denominator, endAmount);
     function _getFraction(
         uint256 numerator,
         uint256 denominator,
@@ -118,10 +119,17 @@ contract AmountDeriver is AmountDerivationErrors {
 
         // Ensure fraction can be applied to the value with no remainder. Note
         // that the denominator cannot be zero.
+        // 檢查能不能整除, 也就是有沒有餘數
         assembly {
             // Ensure new value contains no remainder via mulmod operator.
             // Credit to @hrkrshnn + @axic for proposing this optimal solution.
+            // mulmod(uint x, uint y, uint k) returns (uint): 等於計算 (x * y) % k
+            // Some examples:
+            // mulmod(3, 4, 5) is equal to 2.
+            // mulmod(2**256 - 1, 1, type(uint256).max) is equal to 0.
+            // mulmod(2**255, 2**255, type(uint256).max) is equal to 1.
             if mulmod(value, numerator, denominator) {
+                // 如果有餘數的話, 就會進到這裡來
                 mstore(0, InexactFraction_error_signature)
                 revert(0, InexactFraction_error_len)
             }
@@ -153,6 +161,15 @@ contract AmountDeriver is AmountDerivationErrors {
      *
      * @return amount The received item to transfer with the final amount.
      */
+    //  uint256 amount = _applyFraction(
+    //                     offerItem.startAmount,
+    //                     offerItem.endAmount,
+    //                     numerator,
+    //                     denominator,
+    //                     startTime,
+    //                     endTime,
+    //                     false
+    //                 );
     function _applyFraction(
         uint256 startAmount,
         uint256 endAmount,

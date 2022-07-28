@@ -474,6 +474,8 @@ contract ReferenceOrderValidator is
         returns (bool isFullOrder)
     {
         // The "full" order types are even, while "partial" order types are odd.
-        isFullOrder = uint256(orderType) & 1 == 0;
+        // PARTIAL_OPEN = 1
+        // 如果 uint256(orderType) & 1 為 0, 就表示不是 PARTIAL_OPEN
+        isFullOrder = uint256(orderType) & 1 == 0; // PARTIAL_OPEN
     }
 }
