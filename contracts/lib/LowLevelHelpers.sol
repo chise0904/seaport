@@ -30,7 +30,7 @@ contract LowLevelHelpers {
             success := staticcall(
                 gas(),
                 target,
-                add(callData, OneWord),
+                add(callData, OneWord), // uint256 constant OneWord = 0x20;
                 mload(callData),
                 0,
                 0

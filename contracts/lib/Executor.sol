@@ -46,6 +46,12 @@ contract Executor is Verifiers, TokenTransferrer {
      * @param accumulator An open-ended array that collects transfers to execute
      *                    against a given conduit in a single call.
      */
+    //  _transferConsiderationItem(
+    //      considerationItem,
+    //      msg.sender,
+    //      fulfillerConduitKey,
+    //      accumulator
+    //  );
     function _transfer(
         ReceivedItem memory item,
         address from,

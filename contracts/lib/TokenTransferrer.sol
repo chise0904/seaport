@@ -42,9 +42,18 @@ contract TokenTransferrer is TokenTransferrerErrors {
         assembly {
             // The free memory pointer memory slot will be used when populating
             // call data for the transfer; read the value and restore it later.
-            let memPointer := mload(FreeMemoryPointerSlot)
+            let memPointer := mload(FreeMemoryPointerSlot) // FreeMemoryPointerSlot = 0x40
 
             // Write call data into memory, starting with function selector.
+            // abi.encodeWithSignature("transferFrom(address,address,uint256)")
+            // uint256 constant ERC20_transferFrom_signature = (
+            //     0x23b872dd00000000000000000000000000000000000000000000000000000000
+            // );
+            // uint256 constant ERC20_transferFrom_sig_ptr = 0x0;
+            // uint256 constant ERC20_transferFrom_from_ptr = 0x04;
+            // uint256 constant ERC20_transferFrom_to_ptr = 0x24;
+            // uint256 constant ERC20_transferFrom_amount_ptr = 0x44;
+            // uint256 constant ERC20_transferFrom_length = 0x64; // 4 + 32 * 3 == 100
             mstore(ERC20_transferFrom_sig_ptr, ERC20_transferFrom_signature)
             mstore(ERC20_transferFrom_from_ptr, from)
             mstore(ERC20_transferFrom_to_ptr, to)
@@ -72,7 +81,10 @@ contract TokenTransferrer is TokenTransferrerErrors {
                 // either returned exactly 1 (can't just be non-zero data), or
                 // had no return data.
                 or(
-                    and(eq(mload(0), 1), gt(returndatasize(), 31)),
+                    and(
+                        eq(mload(0), 1),
+                        gt(returndatasize(), 31)
+                    ),
                     iszero(returndatasize())
                 ),
                 callStatus
@@ -246,6 +258,7 @@ contract TokenTransferrer is TokenTransferrerErrors {
         // Utilize assembly to perform an optimized ERC721 token transfer.
         assembly {
             // If the token has no code, revert.
+            // token has no code 表示這個 address 是個 EOA
             if iszero(extcodesize(token)) {
                 mstore(NoContract_error_sig_ptr, NoContract_error_signature)
                 mstore(NoContract_error_token_ptr, token)

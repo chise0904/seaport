@@ -35,6 +35,9 @@ contract AmountDeriver is AmountDerivationErrors {
      *
      * @return amount The current amount.
      */
+     // 因為 startAmount 和 endAmount 不同, 所以得根據 已經經過多少時間 來求目前是多少amount
+     // 根據線性來求解
+     // 
     function _locateCurrentAmount(
         uint256 startAmount,
         uint256 endAmount,
@@ -61,6 +64,37 @@ contract AmountDeriver is AmountDerivationErrors {
                 remaining = duration - elapsed;
             }
 
+            //    startTime                                   endTime
+            //    |<-            duration                   ->|
+            //    |                blockTime                  |
+            //    |<- elapsed    ->|<-     remaining        ->|           
+            //    +----------------+--------------------------+
+            //    |                |                          |
+            //    startAmount      currentAmount              endAmount
+            //
+            //                                     elapsed
+            //    currentAmount = startAmount + -------------- * (endAmount - startAmount)
+            //                                     duration
+            //                                     elapsed                      elapsed
+            //                  = startAmount + -------------- * endAmount - -------------- * startAmount
+            //                                     duration                     duration
+            //
+            //                                     elapsed                        elapsed
+            //                  = startAmount - -------------- * startAmount + -------------- * endAmount
+            //                                     duration                       duration
+            //
+            //                       duration         elapsed                        elapsed
+            //                  = -------------- - -------------- * startAmount + -------------- * endAmount
+            //                       duration         duration                       duration
+            //
+            //                       duration         elapsed                        elapsed
+            //                  = -------------- - -------------- * startAmount + -------------- * endAmount
+            //                       duration         duration                       duration
+            //
+            //                       remaining                      elapsed
+            //                  = -------------- * startAmount + -------------- * endAmount
+            //                       duration                       duration
+            //
             // Aggregate new amounts weighted by time with rounding factor.
             uint256 totalBeforeDivision = ((startAmount * remaining) +
                 (endAmount * elapsed));
@@ -71,11 +105,24 @@ contract AmountDeriver is AmountDerivationErrors {
                 // amount is set to zero if totalBeforeDivision is zero,
                 // as intermediate overflow can occur if it is zero.
                 amount := mul(
+                    // 如果 totalBeforeDivision == 0
+                    // iszero(totalBeforeDivision) = 1
+                    // iszero(iszero(totalBeforeDivision)) = 0
+                    //
+                    // 如果 totalBeforeDivision != 0
+                    // iszero(totalBeforeDivision) = 0
+                    // iszero(iszero(totalBeforeDivision)) = 1
                     iszero(iszero(totalBeforeDivision)),
                     // Subtract 1 from the numerator and add 1 to the result if
                     // roundUp is true to get the proper rounding direction.
                     // Division is performed with no zero check as duration
                     // cannot be zero as long as startTime < endTime.
+
+                    // #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
+                    //
+                    //    totalBeforeDivision - 1
+                    // ----------------------------- + 1
+                    //           duration
                     add(
                         div(sub(totalBeforeDivision, roundUp), duration),
                         roundUp
@@ -107,6 +154,10 @@ contract AmountDeriver is AmountDerivationErrors {
      * @return newValue The value after applying the fraction.
      */
      // _getFraction(numerator, denominator, endAmount);
+     // 其實只是在求
+     //               numerator
+     // newValue = --------------- * value
+     //               denominator
     function _getFraction(
         uint256 numerator,
         uint256 denominator,
@@ -123,6 +174,11 @@ contract AmountDeriver is AmountDerivationErrors {
         assembly {
             // Ensure new value contains no remainder via mulmod operator.
             // Credit to @hrkrshnn + @axic for proposing this optimal solution.
+            // 因為等等要依照 numerator/denominator 的比例從 value 取除最後的 newValue
+            //     numerator
+            // ---------------- * value
+            //    denominator
+            // 並且要確保能整除
             // mulmod(uint x, uint y, uint k) returns (uint): 等於計算 (x * y) % k
             // Some examples:
             // mulmod(3, 4, 5) is equal to 2.
@@ -134,6 +190,11 @@ contract AmountDeriver is AmountDerivationErrors {
                 revert(0, InexactFraction_error_len)
             }
         }
+
+        // 下面其實就是依照比例得出最後的value而已
+        //     numerator
+        // ---------------- * value
+        //    denominator
 
         // Multiply the numerator by the value and ensure no overflow occurs.
         uint256 valueTimesNumerator = value * numerator;

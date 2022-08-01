@@ -120,6 +120,7 @@ contract Verifiers is Assertions, SignatureVerification {
         uint256 orderStatusNumerator = orderStatus.numerator;
 
         // If the order is not entirely unused...
+        // orderStatusNumerator 不為 0, 就表示這個 order 曾經被 fulfill 過
         if (orderStatusNumerator != 0) {
             // ensure the order has not been partially filled when not allowed.
             if (onlyAllowUnused) {
@@ -127,6 +128,8 @@ contract Verifiers is Assertions, SignatureVerification {
                 revert OrderPartiallyFilled(orderHash);
             }
             // Otherwise, ensure that order has not been entirely filled.
+            // orderStatusNumerator == orderStatus.denominator 的話, 就表示這個order已經被fulfilled完了
+            // orderStatusNumerator > orderStatus.denominator 的話, 不太可能, 
             else if (orderStatusNumerator >= orderStatus.denominator) {
                 // Only revert if revertOnInvalid has been supplied as true.
                 if (revertOnInvalid) {

@@ -190,6 +190,33 @@ contract OrderFulfiller is
         // Declare a nested scope to minimize stack depth.
         unchecked {
             // Declare a virtual function pointer taking an OfferItem argument.
+            // 參考 https://ethereum.stackexchange.com/questions/52021/how-to-type-cast-a-function-pointer-in-solidity
+            // 參考 https://github.com/ethereum/solidity/issues/4349
+            // Declare virtual function pointer with ConsiderationItem argument.
+            // 下面的 _transferOfferItem 是一個變數
+            // 這個變數的type是個function pointer, 即 function(OfferItem memory, address, bytes32, bytes memory) internal
+            // 也就是說 _transferOfferItem 可以帶入一個長相為 function(OfferItem memory, address, bytes32, bytes memory) 的函數
+            // 再來更下面的 _transferReceivedItem 也是一個變數
+            // 這個變數的 type 也是個 function pointer, 即 function(ReceivedItem memory, address, bytes32, bytes memory) internal
+            // 然後 
+            // function(ReceivedItem memory, address, bytes32, bytes memory)
+            //         internal _transferReceivedItem = _transfer;
+            // 表示
+            // 讓 _transferReceivedItem 也指向 _transfer 這個 function
+            // 下面是 _transfer function (定義在 contracts/lib/Executor.sol )
+            // function _transfer(
+            //     ReceivedItem memory item,
+            //     address from,
+            //     bytes32 conduitKey,
+            //     bytes memory accumulator
+            // ) internal { 
+            //     // ...
+            // }
+            // 可以看到 _transferReceivedItem 跟 _transfer 都是同樣的 function type
+            // 即 都是 function(OfferItem memory, address, bytes32, bytes memory)
+            // 接下來
+            // _transferConsiderationItem := _transferReceivedItem 就是一個強制轉型的code
+            // 
             function(OfferItem memory, address, bytes32, bytes memory)
                 internal _transferOfferItem;
 
@@ -224,6 +251,7 @@ contract OrderFulfiller is
                 // Declare an additional nested scope to minimize stack depth.
                 {
                     // Apply fill fraction to get offer item amount to transfer.
+                    // 拿到確切的amount
                     uint256 amount = _applyFraction(
                         offerItem.startAmount,
                         offerItem.endAmount,
@@ -280,7 +308,33 @@ contract OrderFulfiller is
 
         // Declare a nested scope to minimize stack depth.
         unchecked {
+            // 參考 https://ethereum.stackexchange.com/questions/52021/how-to-type-cast-a-function-pointer-in-solidity
+            // 參考 https://github.com/ethereum/solidity/issues/4349
             // Declare virtual function pointer with ConsiderationItem argument.
+            // 下面的 _transferConsiderationItem 是一個變數
+            // 這個變數的type是個function pointer, 即 function(ConsiderationItem memory, address, bytes32, bytes memory) internal
+            // 也就是說 _transferConsiderationItem 可以帶入一個長程 function(ConsiderationItem memory, address, bytes32, bytes memory) 的函數
+            // 再來更下面的 _transferReceivedItem 也是一個變數
+            // 這個變數的 type 也是個 function pointer, 即 function(ReceivedItem memory, address, bytes32, bytes memory) internal
+            // 然後 
+            // function(ReceivedItem memory, address, bytes32, bytes memory)
+            //         internal _transferReceivedItem = _transfer;
+            // 表示
+            // 讓 _transferReceivedItem 也指向 _transfer 這個 function
+            // 下面是 _transfer function (定義在 contracts/lib/Executor.sol )
+            // function _transfer(
+            //     ReceivedItem memory item,
+            //     address from,
+            //     bytes32 conduitKey,
+            //     bytes memory accumulator
+            // ) internal { 
+            //     // ...
+            // }
+            // 可以看到 _transferReceivedItem 跟 _transfer 都是同樣的 function type
+            // 即 都是 function(ReceivedItem memory, address, bytes32, bytes memory)
+            // 接下來
+            // _transferConsiderationItem := _transferReceivedItem 就是一個強制轉型的code
+            // 
             function(ConsiderationItem memory, address, bytes32, bytes memory)
                 internal _transferConsiderationItem;
             {
@@ -321,6 +375,18 @@ contract OrderFulfiller is
                 );
 
                 // Use assembly to set overloaded considerationItem arguments.
+                
+                // *   ====== ConsiderationItem =====   ====== ReceivedItem ======
+                // *   ItemType itemType; ------------> ItemType itemType;    // 0x0
+                // *   address token; ----------------> address token;        // 0x20
+                // *   uint256 identifierOrCriteria;--> uint256 identifier;   // 0x40
+                // *   uint256 startAmount; ----------> uint256 amount;       // 0x60
+                // *   uint256 endAmount;        /----> address recipient;    // 0x80
+                // *   address recipient; ------/                             // 0xa0
+
+                // uint256 constant ReceivedItem_amount_offset = 0x60;
+                // uint256 constant ReceivedItem_recipient_offset = 0x80;
+                // uint256 constant ConsiderationItem_recipient_offset = 0xa0;
                 assembly {
                     // Write derived fractional amount to startAmount as amount.
                     mstore(
@@ -329,6 +395,7 @@ contract OrderFulfiller is
                     )
 
                     // Write original recipient to endAmount as recipient.
+                    // 把 ConsiderationItem 的 recipient 寫到 ReceivedItem 的 recipient
                     mstore(
                         add(considerationItem, ReceivedItem_recipient_offset),
                         mload(

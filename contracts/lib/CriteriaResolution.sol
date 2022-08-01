@@ -58,6 +58,10 @@ contract CriteriaResolution is CriteriaResolutionErrors {
                 );
 
                 // Read the order index from memory and place it on the stack.
+                // criteriaResolver.orderIndex 用來指定這個 criteriaResolver 是針對哪個 order 作用的
+                // advancedOrders array 裡面放了很多 order
+                // 而 order 裡面的 parameters 又會放很多的 offer
+                // criteriaResolver.index 就是用來指定哪一個 offer/consideration
                 uint256 orderIndex = criteriaResolver.orderIndex;
 
                 // Ensure that the order index is in range.
@@ -66,6 +70,7 @@ contract CriteriaResolution is CriteriaResolutionErrors {
                 }
 
                 // Skip criteria resolution for order if not fulfilled.
+                // ????
                 if (advancedOrders[orderIndex].numerator == 0) {
                     continue;
                 }
@@ -93,6 +98,7 @@ contract CriteriaResolution is CriteriaResolutionErrors {
                     }
 
                     // Retrieve relevant item using the component index.
+                    // criteriaResolver.index 指定的 offer
                     OfferItem memory offerItem = offer[componentIndex];
 
                     // Read item type and criteria from memory & place on stack.
@@ -101,16 +107,36 @@ contract CriteriaResolution is CriteriaResolutionErrors {
 
                     // Optimistically update item type to remove criteria usage.
                     // Use assembly to operate on ItemType enum as a number.
+                    // enum ItemType {
+                    //     NATIVE,                // 0
+                    //     ERC20,                 // 1
+                    //     ERC721,                // 2
+                    //     ERC1155,               // 3
+                    //     ERC721_WITH_CRITERIA,  // 4
+                    //     ERC1155_WITH_CRITERIA  // 5
+                    // }
+                    // 
                     ItemType newItemType;
                     assembly {
                         // Item type 4 becomes 2 and item type 5 becomes 3.
+                        // ERC721_WITH_CRITERIA -> ERC721
+                        // ERC1155_WITH_CRITERIA -> ERC1155
+                        // 如果 itemType == 4,
+                        // -> eq(itemType, 4) = 1
+                        // -> 3 - 1
+                        // -> 2
+                        //
+                        // 如果 itemType == 5,
+                        // -> eq(itemType, 5) = 0
+                        // -> 3 - 0
+                        // -> 3
                         newItemType := sub(3, eq(itemType, 4))
                     }
                     offerItem.itemType = newItemType;
 
                     // Optimistically update identifier w/ supplied identifier.
-                    offerItem.identifierOrCriteria = criteriaResolver
-                        .identifier;
+                    offerItem.identifierOrCriteria = criteriaResolver.identifier;
+
                 } else {
                     // Otherwise, the resolver refers to a consideration item.
                     ConsiderationItem[] memory consideration = (
@@ -163,6 +189,13 @@ contract CriteriaResolution is CriteriaResolutionErrors {
                     );
                 }
             }
+
+            // 目前猜測
+            // 上面都執行完以後, advancedOrders[] 裡面的 offer/consideration 都不應該還是 ERC721_WITH_CRITERIA 或 ERC1155_WITH_CRITERIA
+            // 還有的話, 就 revert
+            // 也就是說, criteriaResolvers[] 就是要針對 itemType 為 ERC721_WITH_CRITERIA 或 ERC1155_WITH_CRITERIA 的 offer/consideration
+            // 如果有沒對應到的, 例如 offer/consideration 為 ERC721_WITH_CRITERIA 或 ERC1155_WITH_CRITERIA
+            // 卻沒有相對應到的 criteriaResolvers 來處理的話, 就 revert
 
             // Iterate over each advanced order.
             for (uint256 i = 0; i < totalAdvancedOrders; ++i) {
@@ -226,7 +259,8 @@ contract CriteriaResolution is CriteriaResolutionErrors {
         pure
         returns (bool withCriteria)
     {
-        // ERC721WithCriteria is ItemType 4. ERC1155WithCriteria is ItemType 5.
+        // ERC721WithCriteria is ItemType 4. 
+        // ERC1155WithCriteria is ItemType 5.
         assembly {
             withCriteria := gt(itemType, 3)
         }
@@ -258,14 +292,19 @@ contract CriteriaResolution is CriteriaResolutionErrors {
 
             // Based on: https://github.com/Rari-Capital/solmate/blob/v7/src/utils/MerkleProof.sol
             // Get memory start location of the first element in proof array.
+            // data 指向 proof 的數據開始處, 最前面是 length
             let data := add(proof, OneWord)
 
             // Iterate over each proof element to compute the root hash.
             for {
                 // Left shift by 5 is equivalent to multiplying by 0x20.
+                // mload(proof) 可以拿到 length, 例如 5
+                // shl(5, mload(proof)) 對 length 乘上 32 bytes, 得到總共的長度
+                // data + shl(5, mload(proof)) 就是 proof 的最尾巴
                 let end := add(data, shl(5, mload(proof)))
             } lt(data, end) {
                 // Increment by one word at a time.
+                // 每次 + 32 bytes
                 data := add(data, OneWord)
             } {
                 // Get the proof element.

@@ -47,6 +47,7 @@ contract SignatureVerification is SignatureVerificationErrors, LowLevelHelpers {
             // Get the length of the signature.
             let signatureLength := mload(signature)
 
+            // ????
             // Get the pointer to the value preceding the signature length.
             // This will be used for temporary memory overrides - either the
             // signature head for isValidSignature or the digest for ecrecover.
@@ -65,6 +66,10 @@ contract SignatureVerification is SignatureVerificationErrors, LowLevelHelpers {
 
                 // Declare variable for recovered signer.
                 let recoveredSigner
+
+                // uint256 constant ECDSA_MaxLength = 65;
+                // uint256 constant ECDSA_signature_s_offset = 0x40;
+                // uint256 constant ECDSA_signature_v_offset = 0x60;
 
                 // If diff is 0 or 1, it may be an ECDSA signature.
                 // Try to recover signer.
