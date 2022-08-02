@@ -39,6 +39,12 @@ contract ZoneInteraction is ZoneInteractionErrors, LowLevelHelpers {
         address zone
     ) internal view {
         // Order type 2-3 require zone or offerer be caller or zone to approve.
+        // enum OrderType {
+        //     FULL_OPEN,
+        //     PARTIAL_OPEN,
+        //     FULL_RESTRICTED,
+        //     PARTIAL_RESTRICTED
+        // }
         if (
             uint256(orderType) > 1 &&
             msg.sender != zone &&
@@ -58,6 +64,12 @@ contract ZoneInteraction is ZoneInteractionErrors, LowLevelHelpers {
         // Perform minimal staticcall to the zone.
         bool success = _staticcall(
             zone,
+            // function isValidOrder(
+            //     bytes32 orderHash,
+            //     address caller,
+            //     address offerer,
+            //     bytes32 zoneHash
+            // )
             abi.encodeWithSelector(
                 ZoneInterface.isValidOrder.selector,
                 orderHash,
@@ -125,6 +137,13 @@ contract ZoneInteraction is ZoneInteractionErrors, LowLevelHelpers {
                 // that event, perform a more verbose staticcall to the zone.
                 bool success = _staticcall(
                     zone,
+                    // function isValidOrderIncludingExtraData(
+                    //     bytes32 orderHash,
+                    //     address caller,
+                    //     AdvancedOrder calldata order,
+                    //     bytes32[] calldata priorOrderHashes,
+                    //     CriteriaResolver[] calldata criteriaResolvers
+                    // )
                     abi.encodeWithSelector(
                         ZoneInterface.isValidOrderIncludingExtraData.selector,
                         orderHash,

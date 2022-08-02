@@ -78,27 +78,102 @@ contract BasicOrderFulfiller is OrderValidator {
         // Utilize assembly to extract the order type and the basic order route.
         assembly {
             // Read basicOrderType from calldata.
-            let basicOrderType := calldataload(BasicOrder_basicOrderType_cdPtr)
+            let basicOrderType := calldataload(BasicOrder_basicOrderType_cdPtr) // 0x124
 
             // Mask all but 2 least-significant bits to derive the order type.
-            orderType := and(basicOrderType, 3)
+            // 這邊是為了要把 enum BasicOrderType 變成 enum OrderType
+            // BasicOrderType 的 prefix 都是 
+            // XXX_TO_OOO_FULL_OPEN
+            // XXX_TO_OOO_PARTIAL_OPEN,     
+            // XXX_TO_OOO_FULL_RESTRICTED,  
+            // XXX_TO_OOO_PARTIAL_RESTRICTED
+            // 用 and(basicOrderType, 3) 就可以把前面的 XXX_TO_OOO_ 去除, 
+            // 最後得到我們想要的
+            // FULL_OPEN,        
+            // PARTIAL_OPEN,     
+            // FULL_RESTRICTED,  
+            // PARTIAL_RESTRICTED
+            orderType := and(basicOrderType, 3) // 3 = 0011
 
             // Divide basicOrderType by four to derive the route.
+            // 0000 = 0
+            // 0001 = 1
+            // 0010 = 2
+            // 0011 = 3
+            // 0100 = 4
+            // 0101 = 5
+            // 0110 = 6
+            // 0111 = 7
+            // 從上面可以看到, >> 2 後, 3 以上的數字就會被留著
+
+            // ETH_TO_ERC721_FULL_OPEN,               // 0
+            // ETH_TO_ERC721_PARTIAL_OPEN,            // 1        
+            // ETH_TO_ERC721_FULL_RESTRICTED,         // 2           
+            // ETH_TO_ERC721_PARTIAL_RESTRICTED,      // 3              
+                            
+            // ETH_TO_ERC1155_FULL_OPEN,              // 4      
+            // ETH_TO_ERC1155_PARTIAL_OPEN,           // 5         
+            // ETH_TO_ERC1155_FULL_RESTRICTED,        // 6            
+            // ETH_TO_ERC1155_PARTIAL_RESTRICTED,     // 7    
+
+            // 只要是 ETH_ 開頭的, 經過 shr(2, basicOrderType) 就會是 0 或 1
+            // 只要是 ERC20_ 開頭的, 經過 shr(2, basicOrderType) 就會是 2 或 3 或 4 或 5
             route := shr(2, basicOrderType)
 
             // If route > 1 additionalRecipient items are ERC20 (1) else Eth (0)
+            // 這邊是用 gt(), 所以要大於0, 才會為 true
+            // 所以, 只要是 ETH_ 開頭的, additionalRecipientsItemType 就為 0
+            // 所以, 只要是 ERC20_ 開頭的, additionalRecipientsItemType 就為 1
             additionalRecipientsItemType := gt(route, 1)
         }
+            
+            // ERC20_TO_ERC721_FULL_OPEN,             // 8       
+            // ERC20_TO_ERC721_PARTIAL_OPEN,          // 9          
+            // ERC20_TO_ERC721_FULL_RESTRICTED,       // 10             
+            // ERC20_TO_ERC721_PARTIAL_RESTRICTED,    // 11                
+                            
+            // ERC20_TO_ERC1155_FULL_OPEN,            // 12        
+            // ERC20_TO_ERC1155_PARTIAL_OPEN,         // 13           
+            // ERC20_TO_ERC1155_FULL_RESTRICTED,      // 14              
+            // ERC20_TO_ERC1155_PARTIAL_RESTRICTED,   // 15                 
+                        
+            // ERC721_TO_ERC20_FULL_OPEN,             // 16       
+            // ERC721_TO_ERC20_PARTIAL_OPEN,          // 17          
+            // ERC721_TO_ERC20_FULL_RESTRICTED,       // 18             
+            // ERC721_TO_ERC20_PARTIAL_RESTRICTED,    // 19                
+                        
+            // ERC1155_TO_ERC20_FULL_OPEN,            // 20        
+            // ERC1155_TO_ERC20_PARTIAL_OPEN,         // 21           
+            // ERC1155_TO_ERC20_FULL_RESTRICTED,      // 22              
+            // ERC1155_TO_ERC20_PARTIAL_RESTRICTED    // 23  
 
         {
             // Declare temporary variable for enforcing payable status.
+            // 這邊就是用來檢查
+            // 如果是 ETH_ 開頭的話, 就應該夾帶 xxx wei 上來
+            // 如果是 ERC20_ 開頭的話, 就不應該夾帶 xxx wei 上來
             bool correctPayableStatus;
 
             // Utilize assembly to compare the route to the callvalue.
             assembly {
                 // route 0 and 1 are payable, otherwise route is not payable.
+
+                // 如果沒有夾帶wei, 就表示要用 ERC20 來付, orderType 應該要 > 7 (0111),
+                // => shr(2, basicOrderType) > 1
+                // => additionalRecipientsItemType = 1
+                // => iszero(callvalue()) = 1
+                // => correctPayableStatus = 1
+
+                // 如果夾帶wei, 就表示要用 ETH 來付, orderType 應該要 < 7 (0111),
+                // => shr(2, basicOrderType) <= 1
+                // => additionalRecipientsItemType = 0
+                // => iszero(callvalue()) = 0
+                // => correctPayableStatus = 1
                 correctPayableStatus := eq(
                     additionalRecipientsItemType,
+                    // callvalue() 會返回隨著tx挾帶的wei
+                    // 如果沒有夾帶wei的話, iszero(callvalue()) == 1
+                    // 如果有夾帶wei的話, iszero(callvalue()) == 0
                     iszero(callvalue())
                 )
             }
@@ -122,21 +197,50 @@ contract BasicOrderFulfiller is OrderValidator {
             // Utilize assembly to retrieve function arguments and cast types.
             assembly {
                 // Check if offered item type == additional recipient item type.
+
+                // route := shr(2, basicOrderType)
+                //
+                // 如果 gt(route, 3) 為 true, 就表示 basicOrderType 至少是 16
+                // ERC721_TO_ERC20_FULL_OPEN,             // 16       
+                // ERC721_TO_ERC20_PARTIAL_OPEN,          // 17          
+                // ERC721_TO_ERC20_FULL_RESTRICTED,       // 18             
+                // ERC721_TO_ERC20_PARTIAL_RESTRICTED,    // 19                
+                            
+                // ERC1155_TO_ERC20_FULL_OPEN,            // 20        
+                // ERC1155_TO_ERC20_PARTIAL_OPEN,         // 21           
+                // ERC1155_TO_ERC20_FULL_RESTRICTED,      // 22              
+                // ERC1155_TO_ERC20_PARTIAL_RESTRICTED    // 23 
                 offerTypeIsAdditionalRecipientsType := gt(route, 3)
 
                 // If route > 3 additionalRecipientsToken is at 0xc4 else 0x24.
+                // address considerationToken;                 // 0x24 
+                // address offerToken;                         // 0xc4 = 0x24 + 0xa0
+                //
+                // 如果是 ERC721_TO_ERC20_XXX 或 ERC1155_TO_ERC20_XXX 的話, 
+                // 也就是 nft -> 錢
+                // 那 additionalRecipientsToken 就是 offerToken
+                //
+                // 如果是 ETH_TO_ERC721_XXX 或 ETH_TO_ERC1155_XXX 或 ERC20_TO_ERC721_XXX 或 ERC20_TO_ERC1155_XXX
+                // 也就是 錢 -> nft
+                // 那 additionalRecipientsToken 就是 considerationToken
                 additionalRecipientsToken := calldataload(
                     add(
-                        BasicOrder_considerationToken_cdPtr,
+                        BasicOrder_considerationToken_cdPtr, // 0x24
                         mul(
-                            offerTypeIsAdditionalRecipientsType,
-                            BasicOrder_common_params_size
+                            offerTypeIsAdditionalRecipientsType, // 1 或 0
+                            BasicOrder_common_params_size    // 0xa0 = 160 = 32*5
                         )
                     )
                 )
 
                 // If route > 2, receivedItemType is route - 2. If route is 2,
                 // the receivedItemType is ERC20 (1). Otherwise, it is Eth (0).
+                // 如果是 ETH_ 開頭的話, route = 0, receivedItemType == 0
+                // 如果是 ETH_ 開頭的話, route = 1, receivedItemType == 0
+                // 如果是 ERC20_ 開頭的話, route = 2, receivedItemType == 1
+                // 如果是 ERC20_ 開頭的話, route = 3, receivedItemType == 1
+                // 如果是 ERC20_ 開頭的話, route = 4, receivedItemType == 2
+                // 如果是 ERC20_ 開頭的話, route = 5, receivedItemType == 3
                 receivedItemType := add(
                     mul(sub(route, 2), gt(route, 2)),
                     eq(route, 2)
@@ -144,9 +248,12 @@ contract BasicOrderFulfiller is OrderValidator {
 
                 // If route > 3, offeredItemType is ERC20 (1). Route is 2 or 3,
                 // offeredItemType = route. Route is 0 or 1, it is route + 2.
+                // ETH_ 開頭的, additionalRecipientsItemType 就為 0
+                // ERC20_ 開頭的, additionalRecipientsItemType 就為 1
                 offeredItemType := sub(
                     add(route, mul(iszero(additionalRecipientsItemType), 2)),
                     mul(
+                        // ERC721_TO_ERC20_FULL_OPEN 以前的都是 0, 以後的都是 1
                         offerTypeIsAdditionalRecipientsType,
                         add(receivedItemType, 1)
                     )
@@ -371,8 +478,11 @@ contract BasicOrderFulfiller is OrderValidator {
                  */
 
                 // Write ConsiderationItem type hash and item type to memory.
+                // BasicOrder_considerationItem_typeHash_ptr = 0x80
                 mstore(BasicOrder_considerationItem_typeHash_ptr, typeHash)
+
                 mstore(
+                    // BasicOrder_considerationItem_token_ptr = 0xa0;
                     BasicOrder_considerationItem_itemType_ptr,
                     receivedItemType
                 )
@@ -382,18 +492,20 @@ contract BasicOrderFulfiller is OrderValidator {
                 // considerationAmount is written to startAmount and endAmount
                 // as basic orders do not have dynamic amounts.
                 calldatacopy(
+                    // BasicOrder_considerationItem_token_ptr = 0xc0;
                     BasicOrder_considerationItem_token_ptr,
                     BasicOrder_considerationToken_cdPtr,
-                    ThreeWords
+                    ThreeWords // 0x60
                 )
 
                 // Copy calldata region with considerationAmount and offerer
                 // from BasicOrderParameters to endAmount and recipient in
                 // ConsiderationItem.
                 calldatacopy(
+                    // BasicOrder_considerationItem_endAmount_ptr = 0x120;
                     BasicOrder_considerationItem_endAmount_ptr,
                     BasicOrder_considerationAmount_cdPtr,
-                    TwoWords
+                    TwoWords // 0x40
                 )
 
                 // Calculate EIP712 ConsiderationItem hash and store it in the
