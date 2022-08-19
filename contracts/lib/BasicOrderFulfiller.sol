@@ -81,12 +81,15 @@ contract BasicOrderFulfiller is OrderValidator {
             let basicOrderType := calldataload(BasicOrder_basicOrderType_cdPtr) // 0x124
 
             // Mask all but 2 least-significant bits to derive the order type.
+
             // 這邊是為了要把 enum BasicOrderType 變成 enum OrderType
+
             // BasicOrderType 的 prefix 都是 
             // XXX_TO_OOO_FULL_OPEN
             // XXX_TO_OOO_PARTIAL_OPEN,     
             // XXX_TO_OOO_FULL_RESTRICTED,  
             // XXX_TO_OOO_PARTIAL_RESTRICTED
+
             // 用 and(basicOrderType, 3) 就可以把前面的 XXX_TO_OOO_ 去除, 
             // 最後得到我們想要的
             // FULL_OPEN,        
@@ -95,35 +98,28 @@ contract BasicOrderFulfiller is OrderValidator {
             // PARTIAL_RESTRICTED
             orderType := and(basicOrderType, 3) // 3 = 0011
 
-            // Divide basicOrderType by four to derive the route.
-            // 0000 = 0
-            // 0001 = 1
-            // 0010 = 2
-            // 0011 = 3
-            // 0100 = 4
-            // 0101 = 5
-            // 0110 = 6
-            // 0111 = 7
-            // 從上面可以看到, >> 2 後, 3 以上的數字就會被留著
-
-            // ETH_TO_ERC721_FULL_OPEN,               // 0
-            // ETH_TO_ERC721_PARTIAL_OPEN,            // 1        
-            // ETH_TO_ERC721_FULL_RESTRICTED,         // 2           
-            // ETH_TO_ERC721_PARTIAL_RESTRICTED,      // 3              
-                            
-            // ETH_TO_ERC1155_FULL_OPEN,              // 4      
-            // ETH_TO_ERC1155_PARTIAL_OPEN,           // 5         
-            // ETH_TO_ERC1155_FULL_RESTRICTED,        // 6            
-            // ETH_TO_ERC1155_PARTIAL_RESTRICTED,     // 7    
-
-            // 只要是 ETH_ 開頭的, 經過 shr(2, basicOrderType) 就會是 0 或 1
-            // 只要是 ERC20_ 開頭的, 經過 shr(2, basicOrderType) 就會是 2 或 3 或 4 或 5
+            // ETH_TO_ERC721_XXXX >> 2    會得到 0 對應於 BasicOrderRouteType.ETH_TO_ERC721
+            // ETH_TO_ERC1155_XXXX >> 2   會得到 1 對應於 BasicOrderRouteType.ETH_TO_ERC1155
+            // ERC20_TO_ERC721_XXXX >> 2  會得到 2 對應於 BasicOrderRouteType.ERC20_TO_ERC721
+            // ERC20_TO_ERC1155_XXXX >> 2 會得到 3 對應於 BasicOrderRouteType.ERC20_TO_ERC1155
+            // ERC721_TO_ERC20_XXXX >> 2  會得到 4 對應於 BasicOrderRouteType.ERC721_TO_ERC20 
+            // ERC1155_TO_ERC20_XXXX >> 2 會得到 5 對應於 BasicOrderRouteType.ERC1155_TO_ERC20
             route := shr(2, basicOrderType)
 
             // If route > 1 additionalRecipient items are ERC20 (1) else Eth (0)
+
             // 這邊是用 gt(), 所以要大於0, 才會為 true
-            // 所以, 只要是 ETH_ 開頭的, additionalRecipientsItemType 就為 0
-            // 所以, 只要是 ERC20_ 開頭的, additionalRecipientsItemType 就為 1
+
+            // gt(route, 1) 為 0 時, 是下面的情況
+            // ETH_TO_ERC721,
+            // ETH_TO_ERC1155
+
+            // gt(route, 1) 為 0 時, 是下面的情況
+            // ERC20_TO_ERC721, 
+            // ERC20_TO_ERC1155,
+            // ERC721_TO_ERC20, 
+            // ERC1155_TO_ERC20 
+            // 用 additionalRecipientsItemType 來判斷是要用 native eth 來交易, 還是要用 ERC token
             additionalRecipientsItemType := gt(route, 1)
         }
             
@@ -198,9 +194,12 @@ contract BasicOrderFulfiller is OrderValidator {
             assembly {
                 // Check if offered item type == additional recipient item type.
 
-                // route := shr(2, basicOrderType)
-                //
-                // 如果 gt(route, 3) 為 true, 就表示 basicOrderType 至少是 16
+                // === offerTypeIsAdditionalRecipientsType 為 1 ===
+                // 如果 gt(route, 3) 為 true, 就表示 route 是
+                // ERC721_TO_ERC20, 
+                // ERC1155_TO_ERC20 
+
+                // 即
                 // ERC721_TO_ERC20_FULL_OPEN,             // 16       
                 // ERC721_TO_ERC20_PARTIAL_OPEN,          // 17          
                 // ERC721_TO_ERC20_FULL_RESTRICTED,       // 18             
@@ -210,19 +209,37 @@ contract BasicOrderFulfiller is OrderValidator {
                 // ERC1155_TO_ERC20_PARTIAL_OPEN,         // 21           
                 // ERC1155_TO_ERC20_FULL_RESTRICTED,      // 22              
                 // ERC1155_TO_ERC20_PARTIAL_RESTRICTED    // 23 
+                //
+                // 代表 seller 要用 ERC20 來換 ERC721/ERC1155
+                // 所以 offer 會是 ERC20
+                // consideration 會放 ERC721/ERC1155
+
+                // === offerTypeIsAdditionalRecipientsType 為 0 ===
+                // 如果 gt(route, 3) 為 false, 就表示 route 是
+                // ETH_TO_ERC721,  
+                // ETH_TO_ERC1155, 
+                // ERC20_TO_ERC721,
+                // ERC20_TO_ERC1155
+                //
+                // 代表 seller 要用 ERC721/ERC1155 來換 ETH/ERC20
+                // 所以 offer 會是 ERC721/ERC1155
+                // consideration 會放 ETH/ERC20
+
                 offerTypeIsAdditionalRecipientsType := gt(route, 3)
 
                 // If route > 3 additionalRecipientsToken is at 0xc4 else 0x24.
                 // address considerationToken;                 // 0x24 
                 // address offerToken;                         // 0xc4 = 0x24 + 0xa0
                 //
-                // 如果是 ERC721_TO_ERC20_XXX 或 ERC1155_TO_ERC20_XXX 的話, 
-                // 也就是 nft -> 錢
+                // 如果是 ERC721_TO_ERC20_XXX | ERC1155_TO_ERC20_XXX 的話, 
+                // 也就是 seller 出 ERC20 要換 ERC721/ERC1155
                 // 那 additionalRecipientsToken 就是 offerToken
                 //
-                // 如果是 ETH_TO_ERC721_XXX 或 ETH_TO_ERC1155_XXX 或 ERC20_TO_ERC721_XXX 或 ERC20_TO_ERC1155_XXX
-                // 也就是 錢 -> nft
+                // 如果是 ERC20_TO_ERC721_XXX | ERC20_TO_ERC1155_XXX
+                // 也就是 seller 出 ERC721/ERC1155 要換 ERC20
                 // 那 additionalRecipientsToken 就是 considerationToken
+
+                // additionalRecipientsToken 用來存放 ERC20 token address
                 additionalRecipientsToken := calldataload(
                     add(
                         BasicOrder_considerationToken_cdPtr, // 0x24
@@ -235,25 +252,81 @@ contract BasicOrderFulfiller is OrderValidator {
 
                 // If route > 2, receivedItemType is route - 2. If route is 2,
                 // the receivedItemType is ERC20 (1). Otherwise, it is Eth (0).
-                // 如果是 ETH_ 開頭的話, route = 0, receivedItemType == 0
-                // 如果是 ETH_ 開頭的話, route = 1, receivedItemType == 0
-                // 如果是 ERC20_ 開頭的話, route = 2, receivedItemType == 1
-                // 如果是 ERC20_ 開頭的話, route = 3, receivedItemType == 1
-                // 如果是 ERC20_ 開頭的話, route = 4, receivedItemType == 2
-                // 如果是 ERC20_ 開頭的話, route = 5, receivedItemType == 3
+                // 如果是 ETH_TO_ERC721_OOXX 開頭的話, route = 0, receivedItemType == ItemType.NATIVE == 0
+                // 如果是 ETH_TO_ERC1155_OOXX 開頭的話, route = 1, receivedItemType == ItemType.NATIVE == 0
+                // 如果是 ERC20_TO_ERC721_OOXX 開頭的話, route = 2, receivedItemType == ItemType.ERC20 == 1
+                // 如果是 ERC20_TO_ERC1155_OOXX 開頭的話, route = 3, receivedItemType == ItemType.ERC20 == 1
+                // 如果是 ERC721_ 開頭的話, route = 4, receivedItemType == ItemType.ERC721 == 2
+                // 如果是 ERC1155_ 開頭的話, route = 5, receivedItemType == ItemType.ERC1155 == 3
+                //
+                // receivedItemType 用來存放是 NATIVE|ERC20|ERC721|ERC1155
+                // 即
+                // 賣家想要收到什麼要的東西? 是 eth ? 還是 ERC20 ? 還是 ERC721 ? 還是 ERC1155 ?
                 receivedItemType := add(
                     mul(sub(route, 2), gt(route, 2)),
                     eq(route, 2)
                 )
 
+                // offeredItemType 用來表示是 ItemType 的哪一個
+                //
+                // BasicOrderType 都是長下面這些樣子
+                // ETH_TO_ERC721_XXX
+                // ETH_TO_ERC1155_XXX
+                // ERC20_TO_ERC721_XXX
+                // ERC20_TO_ERC1155_XXX
+                // ERC721_TO_ERC20_XXX
+                // ERC1155_TO_ERC20_XXX
+                //
+                // 如果是 ETH_TO_ERC721_XXX 那 offeredItemType = ItemType.ERC721
+                // 如果是 ETH_TO_ERC1155_XXX 那 offeredItemType = ItemType.ERC1155
+                // 如果是 ERC20_TO_ERC721_XXX 那 offeredItemType = ItemType.ERC721
+                // 如果是 ERC20_TO_ERC1155_XXX 那 offeredItemType = ItemType.ERC1155
+                // 如果是 ERC721_TO_ERC20_XXX 那 offeredItemType = ItemType.ERC20
+                // 如果是 ERC1155_TO_ERC20_XXX 那 offeredItemType = ItemType.ERC20
+                //
+                // 也就是說, 只要是 TO_OOXX 那 offeredItemType = ItemType.OOXX
+                // 即
+                // 賣家出什麼類型的token
+
+                // 下面是 offeredItemType 的計算過程
+
                 // If route > 3, offeredItemType is ERC20 (1). Route is 2 or 3,
                 // offeredItemType = route. Route is 0 or 1, it is route + 2.
-                // ETH_ 開頭的, additionalRecipientsItemType 就為 0
-                // ERC20_ 開頭的, additionalRecipientsItemType 就為 1
+
+                // route = 0, 
+                // additionalRecipientsItemType = 0, offerTypeIsAdditionalRecipientsType = 0, receivedItemType = 0
+                // => offeredItemType = sub( add(0, mul(1,2)), mul(0, add(0,1)) )
+                // => offeredItemType = 2
+                
+                // route = 1, 
+                // additionalRecipientsItemType = 0, offerTypeIsAdditionalRecipientsType = 0, receivedItemType = 0
+                // => offeredItemType = sub( add(1, mul(1,2)), mul(0, add(0,1)) )
+                // => offeredItemType = 3
+                
+                // route = 2, 
+                // additionalRecipientsItemType = 1, offerTypeIsAdditionalRecipientsType = 0, receivedItemType = 1
+                // => offeredItemType = sub( add(2, mul(0,2)), mul(0, add(1,1)) )
+                // => offeredItemType = 2
+
+                // route = 3, 
+                // additionalRecipientsItemType = 1, offerTypeIsAdditionalRecipientsType = 0, receivedItemType = 1
+                // => offeredItemType = sub( add(3, mul(0,2)), mul(0, add(1,1)) ) 
+                // => offeredItemType = 3
+
+                // route = 4, 
+                // additionalRecipientsItemType = 1, offerTypeIsAdditionalRecipientsType = 1, receivedItemType = 2
+                // => offeredItemType = sub( add(4, mul(0,2)), mul(1, add(2,1)) )
+                // => offeredItemType = 1
+
+                // route = 5, 
+                // additionalRecipientsItemType = 1, offerTypeIsAdditionalRecipientsType = 1, receivedItemType = 3
+                // => offeredItemType = sub( add(5, mul(0,2)), mul(1, add(3,1)) )
+                // => offeredItemType = 1
+                
                 offeredItemType := sub(
                     add(route, mul(iszero(additionalRecipientsItemType), 2)),
                     mul(
-                        // ERC721_TO_ERC20_FULL_OPEN 以前的都是 0, 以後的都是 1
+                        // ERC721_TO_ERC20_FULL_OPEN (16, route = 4) 以前的都是 0, 以後的都是 1
                         offerTypeIsAdditionalRecipientsType,
                         add(receivedItemType, 1)
                     )
@@ -277,15 +350,33 @@ contract BasicOrderFulfiller is OrderValidator {
         // Utilize assembly to derive conduit (if relevant) based on route.
         assembly {
             // use offerer conduit for routes 0-3, fulfiller conduit otherwise.
+           
+            // bytes32 offererConduitKey;                  // 0x1c4 
+            // bytes32 fulfillerConduitKey;                // 0x1e4
+
+            // 賣家出 nft 要換 ERC20 時, 就是用 offererConduitKey
+            // 賣家出 ERC20 要換 nft 時, 就是用 fulfillerConduitKey
             conduitKey := calldataload(
                 add(
-                    BasicOrder_offererConduit_cdPtr,
+                    BasicOrder_offererConduit_cdPtr, // 0x1c4
+
+                    // offerTypeIsAdditionalRecipientsType 為 0 的情況是
+                    // ETH_TO_ERC721,    
+                    // ETH_TO_ERC1155,   
+                    // ERC20_TO_ERC721,  
+                    // ERC20_TO_ERC1155, 
+
+                    // offerTypeIsAdditionalRecipientsType 為 1 的情況是
+                    // ERC721_TO_ERC20,
+                    // ERC1155_TO_ERC20
                     mul(offerTypeIsAdditionalRecipientsType, OneWord)
                 )
             )
         }
 
         // Transfer tokens based on the route.
+        // 只要 BasicOrderType 是 ETH_ 開頭的, additionalRecipientsItemType 就為 0
+        // 只要 BasicOrderType 是 ERC20_ 開頭的, additionalRecipientsItemType 就為 1
         if (additionalRecipientsItemType == ItemType.NATIVE) {
             // Ensure neither the token nor the identifier parameters are set.
             if (
@@ -296,6 +387,7 @@ contract BasicOrderFulfiller is OrderValidator {
             }
 
             // Transfer the ERC721 or ERC1155 item, bypassing the accumulator.
+            // 將 ERC721/ERC1155 從 offerer 轉給 msg.sender
             _transferIndividual721Or1155Item(
                 offeredItemType,
                 parameters.offerToken,
@@ -308,8 +400,8 @@ contract BasicOrderFulfiller is OrderValidator {
 
             // Transfer native to recipients, return excess to caller & wrap up.
             _transferEthAndFinalize(
-                parameters.considerationAmount,
-                parameters.offerer,
+                parameters.considerationAmount, // value
+                parameters.offerer,             // to
                 parameters.additionalRecipients
             );
         } else {
@@ -321,7 +413,9 @@ contract BasicOrderFulfiller is OrderValidator {
             bytes memory accumulator = new bytes(AccumulatorDisarmed);
 
             // Choose transfer method for ERC721 or ERC1155 item based on route.
+            
             if (route == BasicOrderRouteType.ERC20_TO_ERC721) {
+                // 買家用 ERC20 去買 賣家提供的 ERC721
                 // Transfer ERC721 to caller using offerer's conduit preference.
                 _transferERC721(
                     parameters.offerToken,
@@ -333,6 +427,9 @@ contract BasicOrderFulfiller is OrderValidator {
                     accumulator
                 );
             } else if (route == BasicOrderRouteType.ERC20_TO_ERC1155) {
+                // 買家用 ERC20 去買 賣家提供的 ERC1155
+                // 換句話說, 賣家提供 ERC1155 要換 ERC20
+                // 所以, offerXXX 就會填 ERC1155 相關info
                 // Transfer ERC1155 to caller with offerer's conduit preference.
                 _transferERC1155(
                     parameters.offerToken,
@@ -344,6 +441,9 @@ contract BasicOrderFulfiller is OrderValidator {
                     accumulator
                 );
             } else if (route == BasicOrderRouteType.ERC721_TO_ERC20) {
+                // 買家用 ERC721 去買 賣家提供的 ERC20
+                // 換句話說, 賣家提供 ERC20 要換 ERC721
+                // 所以, considerationXXX 就會填 ERC721 相關info
                 // Transfer ERC721 to offerer using caller's conduit preference.
                 _transferERC721(
                     parameters.considerationToken,
@@ -356,7 +456,9 @@ contract BasicOrderFulfiller is OrderValidator {
                 );
             } else {
                 // route == BasicOrderRouteType.ERC1155_TO_ERC20
-
+                // 買家用 ERC1155 去買 賣家提供的 ERC20
+                // 換句話說, 賣家提供 ERC20 要換 ERC1155
+                // 所以, considerationXXX 就會填 ERC1155 相關info
                 // Transfer ERC1155 to offerer with caller's conduit preference.
                 _transferERC1155(
                     parameters.considerationToken,
@@ -437,6 +539,7 @@ contract BasicOrderFulfiller is OrderValidator {
         _assertValidBasicOrderParameters();
 
         // Ensure supplied consideration array length is not less than original.
+        // additionalRecipients.length 的大小必須大於 totalOriginalAdditionalRecipients
         _assertConsiderationLengthIsNotLessThanOriginalConsiderationLength(
             parameters.additionalRecipients.length,
             parameters.totalOriginalAdditionalRecipients
@@ -448,7 +551,17 @@ contract BasicOrderFulfiller is OrderValidator {
         {
             /**
              * First, handle consideration items. Memory Layout:
+
              *  0x60: final hash of the array of consideration item hashes
+
+            struct ConsiderationItem {
+                ItemType itemType;
+                address token;
+                uint256 identifierOrCriteria;
+                uint256 startAmount;
+                uint256 endAmount;
+                address payable recipient;
+            }
              *  0x80-0x160: reused space for EIP712 hashing of each item
              *   - 0x80: ConsiderationItem EIP-712 typehash (constant)
              *   - 0xa0: itemType
@@ -457,12 +570,15 @@ contract BasicOrderFulfiller is OrderValidator {
              *   - 0x100: startAmount
              *   - 0x120: endAmount
              *   - 0x140: recipient
+
              *  0x160-END_ARR: array of consideration item hashes
              *   - 0x160: primary consideration item EIP712 hash
              *   - 0x180-END_ARR: additional recipient item EIP712 hashes
+
              *  END_ARR: beginning of data for OrderFulfilled event
              *   - END_ARR + 0x120: length of ReceivedItem array
              *   - END_ARR + 0x140: beginning of data for first ReceivedItem
+
              * (Note: END_ARR = 0x180 + RECIPIENTS_LENGTH * 0x20)
              */
 
@@ -491,18 +607,29 @@ contract BasicOrderFulfiller is OrderValidator {
                 // BasicOrderParameters to ConsiderationItem. The
                 // considerationAmount is written to startAmount and endAmount
                 // as basic orders do not have dynamic amounts.
+
+                // 注意:
+                // 這邊的 calldata 是從 _validateAndFulfillBasicOrder() 來的
+                // 雖然 _validateAndFulfillBasicOrder() 裡面又調用了 _prepareBasicFulfillmentFromCalldata()
+                // 但 calldata 仍舊是 _validateAndFulfillBasicOrder() 中的參數
+
+                // 將 BasicOrderParameters 的 considerationToken, considerationIdentifier, considerationAmount 的值 複製到 BasicOrder_considerationItem_token_ptr
+                // 這邊複製的 considerationAmount 是 startAmount
                 calldatacopy(
-                    // BasicOrder_considerationItem_token_ptr = 0xc0;
-                    BasicOrder_considerationItem_token_ptr,
-                    BasicOrder_considerationToken_cdPtr,
+                    BasicOrder_considerationItem_token_ptr, // BasicOrder_considerationItem_token_ptr = 0xc0;
+                    BasicOrder_considerationToken_cdPtr,    // BasicOrder_considerationToken_cdPtr    = 0x24;
                     ThreeWords // 0x60
                 )
 
                 // Copy calldata region with considerationAmount and offerer
                 // from BasicOrderParameters to endAmount and recipient in
                 // ConsiderationItem.
+                // 這邊共複製了 considerationAmount, offerer
+                // 這邊又再複製了一次 considerationAmount 用來當作 emdAmount
+                // offerer 是 recipient
                 calldatacopy(
                     // BasicOrder_considerationItem_endAmount_ptr = 0x120;
+                    // BasicOrder_considerationAmount_cdPtr = 0x64;
                     BasicOrder_considerationItem_endAmount_ptr,
                     BasicOrder_considerationAmount_cdPtr,
                     TwoWords // 0x40
@@ -510,6 +637,7 @@ contract BasicOrderFulfiller is OrderValidator {
 
                 // Calculate EIP712 ConsiderationItem hash and store it in the
                 // array of EIP712 consideration hashes.
+                // BasicOrder_considerationHashesArray_ptr = 0x160;
                 mstore(
                     BasicOrder_considerationHashesArray_ptr,
                     keccak256(
@@ -518,21 +646,28 @@ contract BasicOrderFulfiller is OrderValidator {
                     )
                 )
 
+                // ===============================================================
+
                 /*
                  * 2. Write a ReceivedItem struct for the primary consideration
                  * item to the consideration array in OrderFulfilled.
                  */
 
                 // Get the length of the additional recipients array.
+                // BasicOrder_additionalRecipients_length_cdPtr = 0x264;
                 let totalAdditionalRecipients := calldataload(
                     BasicOrder_additionalRecipients_length_cdPtr
                 )
 
                 // Calculate pointer to length of OrderFulfilled consideration
                 // array.
+                // OrderFulfilled_consideration_length_baseOffset = 0x2a0;
                 let eventConsiderationArrPtr := add(
                     OrderFulfilled_consideration_length_baseOffset,
-                    mul(totalAdditionalRecipients, OneWord)
+                    mul(
+                        totalAdditionalRecipients, 
+                        OneWord
+                    )
                 )
 
                 // Set the length of the consideration array to the number of
@@ -754,6 +889,8 @@ contract BasicOrderFulfiller is OrderValidator {
             }
         }
 
+        // ============================================================
+
         {
             /**
              * Next, handle offered items. Memory Layout:
@@ -776,27 +913,45 @@ contract BasicOrderFulfiller is OrderValidator {
                  */
 
                 // Write the OfferItem typeHash to memory.
+                // uint256 constant BasicOrder_offerItem_typeHash_ptr = DefaultFreeMemoryPointer = 0x80;
                 mstore(BasicOrder_offerItem_typeHash_ptr, typeHash)
 
+                // struct OfferItem {
+                //     ItemType itemType;
+                //     address token;
+                //     uint256 identifierOrCriteria;
+                //     uint256 startAmount;
+                //     uint256 endAmount;
+                // }
+
                 // Write the OfferItem item type to memory.
-                mstore(BasicOrder_offerItem_itemType_ptr, offeredItemType)
+                mstore(
+                    BasicOrder_offerItem_itemType_ptr, // BasicOrder_offerItem_itemType_ptr = 0xa0;
+                    offeredItemType
+                )
 
                 // Copy calldata region with (offerToken, offerIdentifier,
                 // offerAmount) from OrderParameters to (token, identifier,
                 // startAmount) in OfferItem struct. The offerAmount is written
                 // to startAmount and endAmount as basic orders do not have
                 // dynamic amounts.
+
+                // 將下面的 BasicOrder_offerItem_token_ptr
+                // address offerToken;                         // 0xc4  
+                // uint256 offerIdentifier;                    // 0xe4  
+                // uint256 offerAmount;                        // 0x104 
                 calldatacopy(
-                    BasicOrder_offerItem_token_ptr,
-                    BasicOrder_offerToken_cdPtr,
+                    BasicOrder_offerItem_token_ptr, // BasicOrder_offerItem_token_ptr = 0xc0;
+                    BasicOrder_offerToken_cdPtr,    // BasicOrder_offerToken_cdPtr = 0xc4;
                     ThreeWords
                 )
 
                 // Copy offerAmount from calldata to endAmount in OfferItem
                 // struct.
+                // 0xc0 + 0x60 = 0x120
                 calldatacopy(
-                    BasicOrder_offerItem_endAmount_ptr,
-                    BasicOrder_offerAmount_cdPtr,
+                    BasicOrder_offerItem_endAmount_ptr, // BasicOrder_offerItem_endAmount_ptr = 0x120;
+                    BasicOrder_offerAmount_cdPtr,       // BasicOrder_offerAmount_cdPtr = 0x104;
                     OneWord
                 )
 
@@ -815,7 +970,10 @@ contract BasicOrderFulfiller is OrderValidator {
                  * result to the corresponding OfferItem struct:
                  *   `keccak256(abi.encodePacked(offerItemHashes))`
                  */
-                mstore(BasicOrder_order_offerHashes_ptr, keccak256(0, OneWord))
+                mstore(
+                    BasicOrder_order_offerHashes_ptr, 
+                    keccak256(0, OneWord)
+                )
 
                 /*
                  * 3. Write SpentItem to offer array in OrderFulfilled event.
@@ -1085,6 +1243,7 @@ contract BasicOrderFulfiller is OrderValidator {
             // Skip underflow check as etherRemaining > amount.
             unchecked {
                 // Transfer remaining Ether to the caller.
+                // 返回給 fulfill 這個 order 的人, 即 msg.sender
                 _transferEth(payable(msg.sender), etherRemaining - amount);
             }
         }
@@ -1101,6 +1260,12 @@ contract BasicOrderFulfiller is OrderValidator {
      * @param accumulator An open-ended array that collects transfers to execute
      *                    against a given conduit in a single call.
      */
+    //  _transferERC20AndFinalize(
+    //      parameters.offerer,
+    //      parameters,
+    //      offerTypeIsAdditionalRecipientsType,
+    //      accumulator
+    //  );
     function _transferERC20AndFinalize(
         address offerer,
         BasicOrderParameters calldata parameters,
@@ -1122,6 +1287,25 @@ contract BasicOrderFulfiller is OrderValidator {
 
             // Set ERC20 token transfer variables based on fromOfferer boolean.
             if (fromOfferer) {
+
+                // 如果是下面這幾種類型, fromOfferer 為 true
+
+                // ERC721_TO_ERC20_FULL_OPEN,         
+                // ERC721_TO_ERC20_PARTIAL_OPEN,      
+                // ERC721_TO_ERC20_FULL_RESTRICTED,   
+                // ERC721_TO_ERC20_PARTIAL_RESTRICTED,
+                                                
+                // ERC1155_TO_ERC20_FULL_OPEN,        
+                // ERC1155_TO_ERC20_PARTIAL_OPEN,     
+                // ERC1155_TO_ERC20_FULL_RESTRICTED,  
+                // ERC1155_TO_ERC20_PARTIAL_RESTRICTED
+
+                // 上面代表賣家提供ERC20要換ERC721/ERC1155
+                // 所以 offerToken,offerIdentifier,offerAmount 就會是 erc20 相關 info
+                // consideration部分就是erc721/erc1155 相關 info
+
+                // 因為這邊是要transfer ERC20 所以, 都是拿 offerXXX 部分
+
                 // Use offerer as from value and msg.sender as to value.
                 from = offerer;
                 to = msg.sender;
@@ -1132,6 +1316,17 @@ contract BasicOrderFulfiller is OrderValidator {
                 amount = parameters.offerAmount;
             } else {
                 // Use msg.sender as from value and offerer as to value.
+                                                
+                // ERC20_TO_ERC721_FULL_OPEN,         
+                // ERC20_TO_ERC721_PARTIAL_OPEN,      
+                // ERC20_TO_ERC721_FULL_RESTRICTED,   
+                // ERC20_TO_ERC721_PARTIAL_RESTRICTED,
+                                                
+                // ERC20_TO_ERC1155_FULL_OPEN,        
+                // ERC20_TO_ERC1155_PARTIAL_OPEN,     
+                // ERC20_TO_ERC1155_FULL_RESTRICTED,  
+                // ERC20_TO_ERC1155_PARTIAL_RESTRICTED
+
                 from = msg.sender;
                 to = offerer;
 
@@ -1151,12 +1346,29 @@ contract BasicOrderFulfiller is OrderValidator {
         bytes32 conduitKey;
 
         // Utilize assembly to derive conduit (if relevant) based on route.
+        // fromOfferer 為 0 的情況是 
+        // ERC20_TO_ERC721,  
+        // ERC20_TO_ERC1155, 
+
+        // fromOfferer 為 1 的情況是
+        // ERC721_TO_ERC20,
+        // ERC1155_TO_ERC20
+        // 當 fromOfferer 為 1 會用 offererConduitKey
+        // 當 fromOfferer 為 1 表示 賣家出 ERC20 來買 ERC721/ERC1155
+
+        // 當 fromOfferer 為 0 會用 fulfillerConduitKey
+        // 當 fromOfferer 為 0 表示 賣家出 ERC721/ERC1155 來買 ERC20
         assembly {
             // Use offerer conduit if fromOfferer, fulfiller conduit otherwise.
+            // bytes32 offererConduitKey;                  // 0x1c4                                         
+            // bytes32 fulfillerConduitKey;                // 0x1e4
             conduitKey := calldataload(
                 sub(
-                    BasicOrder_fulfillerConduit_cdPtr,
-                    mul(fromOfferer, OneWord)
+                    BasicOrder_fulfillerConduit_cdPtr, // BasicOrder_fulfillerConduit_cdPtr = 0x1e4;
+                    mul(
+                        fromOfferer, 
+                        OneWord
+                    )
                 )
             )
         }

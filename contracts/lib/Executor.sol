@@ -126,6 +126,15 @@ contract Executor is Verifiers, TokenTransferrer {
      *                   signifies that no conduit should be used, with direct
      *                   approvals set on this contract.
      */
+    //  _transferIndividual721Or1155Item(
+    //      offeredItemType,
+    //      parameters.offerToken,
+    //      parameters.offerer,
+    //      msg.sender,
+    //      parameters.offerIdentifier,
+    //      parameters.offerAmount,
+    //      conduitKey
+    //  );
     function _transferIndividual721Or1155Item(
         ItemType itemType,
         address token,
@@ -142,17 +151,39 @@ contract Executor is Verifiers, TokenTransferrer {
 
             // Utilize assembly to place each argument in free memory.
             assembly {
+                // 這邊就是要構建調用 conduit 的 execute() 的 calldata
+                // 所以會先塞 execute() 的 function selector
+                // 再來塞 execute() 的參數 ConduitTransfer[]
+
                 // Retrieve the free memory pointer and use it as the offset.
-                callDataOffset := mload(FreeMemoryPointerSlot)
+                callDataOffset := mload(FreeMemoryPointerSlot) // FreeMemoryPointerSlot = 0x40;
 
                 // Write ConduitInterface.execute.selector to memory.
-                mstore(callDataOffset, Conduit_execute_signature)
+                // 先放 execute() 的 function selector
+                mstore(callDataOffset, Conduit_execute_signature) // Conduit_execute_signature = 0x4ce34aa200000000000000000000000000000000000000000000000000000000
+
+                // function execute(ConduitTransfer[] calldata transfers)
+                // struct ConduitTransfer {
+                //     ConduitItemType itemType; // 0x00
+                //     address token;            // 0x20
+                //     address from;             // 0x40
+                //     address to;               // 0x60
+                //     uint256 identifier;       // 0x80
+                //     uint256 amount;           // 0xa0
+                // }
+
+                
+                // uint256 constant Conduit_execute_ConduitTransfer_offset_ptr = 0x04;
+                // uint256 constant Conduit_execute_ConduitTransfer_length_ptr = 0x24;
+
+                // uint256 constant Conduit_execute_ConduitTransfer_ptr = 0x20;
+                // uint256 constant Conduit_execute_ConduitTransfer_length = 0x01;
 
                 // Write the offset to the ConduitTransfer array in memory.
                 mstore(
                     add(
                         callDataOffset,
-                        Conduit_execute_ConduitTransfer_offset_ptr
+                        Conduit_execute_ConduitTransfer_offset_ptr 
                     ),
                     Conduit_execute_ConduitTransfer_ptr
                 )
@@ -161,7 +192,7 @@ contract Executor is Verifiers, TokenTransferrer {
                 mstore(
                     add(
                         callDataOffset,
-                        Conduit_execute_ConduitTransfer_length_ptr
+                        Conduit_execute_ConduitTransfer_length_ptr 
                     ),
                     Conduit_execute_ConduitTransfer_length
                 )
@@ -204,7 +235,7 @@ contract Executor is Verifiers, TokenTransferrer {
             _callConduitUsingOffsets(
                 conduitKey,
                 callDataOffset,
-                OneConduitExecute_size
+                OneConduitExecute_size // OneConduitExecute_size = 0x104 = 260
             );
         } else {
             // Otherwise, determine whether it is an ERC721 or ERC1155 item.
@@ -318,6 +349,30 @@ contract Executor is Verifiers, TokenTransferrer {
      * @param accumulator An open-ended array that collects transfers to execute
      *                    against a given conduit in a single call.
      */
+    // 用 ERC20 去換 ERC721
+    //  _transferERC721(
+    //      parameters.offerToken,
+    //      parameters.offerer,
+    //      msg.sender,
+    //      parameters.offerIdentifier,
+    //      parameters.offerAmount,
+    //      conduitKey,
+    //      accumulator
+    //  );
+
+    // 買家用 ERC721 去換 賣家的ERC20
+    // _transferERC721(
+    //     parameters.considerationToken,
+    //     msg.sender,
+    //     parameters.offerer,
+    //     parameters.considerationIdentifier,
+    //     parameters.considerationAmount,
+    //     conduitKey,
+    //     accumulator
+    // );
+    // 這種order
+    // 賣家會填
+    
     function _transferERC721(
         address token,
         address from,
@@ -341,6 +396,7 @@ contract Executor is Verifiers, TokenTransferrer {
             _performERC721Transfer(token, from, to, identifier);
         } else {
             // Insert the call to the conduit into the accumulator.
+            // ????
             _insert(
                 conduitKey,
                 accumulator,
@@ -384,6 +440,7 @@ contract Executor is Verifiers, TokenTransferrer {
         _assertNonZeroAmount(amount);
 
         // Trigger accumulated transfers if the conduits differ.
+        // ????
         _triggerIfArmedAndNotAccumulatable(accumulator, conduitKey);
 
         // If no conduit has been specified...
@@ -392,6 +449,7 @@ contract Executor is Verifiers, TokenTransferrer {
             _performERC1155Transfer(token, from, to, identifier, amount);
         } else {
             // Insert the call to the conduit into the accumulator.
+            // ????
             _insert(
                 conduitKey,
                 accumulator,
@@ -473,14 +531,40 @@ contract Executor is Verifiers, TokenTransferrer {
         assembly {
             // Call begins at third word; the first is length or "armed" status,
             // and the second is the current conduit key.
+
+            // 0x00        0x20         0x40        0x44                            0x64
+            // +-----------+------------+-----------+-------------------------------+--------------+
+            // |   length  | conduitKey |  selector | Accumulator_array_offset (20) | elements (1) |
+            // +-----------+------------+-----------+-------------------------------+--------------+
+            //                          TwoWords
+
+            // TwoWords 後就是 要調用 execute() 時需要用到的參數
+            // function execute(ConduitTransfer[] calldata transfers)
+            // 先是 execute.selector 了
+            // 再來是 ConduitTransfer[]
+
             callDataOffset := add(accumulator, TwoWords)
 
             // 68 + items * 192
             callDataSize := add(
-                Accumulator_array_offset_ptr,
+                
+                //      selector                 =  4 bytes (0x04)
+                //      Accumulator_array_offset = 32 bytes (0x20)
+                //   +) elements                 = 32 bytes (0x20)
+                // --------------------------------------------------
+                //                                 68 bytes (0x44)
+                Accumulator_array_offset_ptr, // Accumulator_array_offset_ptr = 0x44;
+
+                // 下面的 mul() 把 0x64 處的 length 的值拿出來 乘上 struct ConduitTransfer{} 的 size
+                // struct ConduitTransfer{} 的 size = 0xc0 = 192
                 mul(
-                    mload(add(accumulator, Accumulator_array_length_ptr)),
-                    Conduit_transferItem_size
+                    mload(
+                        add(
+                            accumulator, 
+                            Accumulator_array_length_ptr // Accumulator_array_length_ptr = 0x64 = 100;
+                        )
+                    ), 
+                    Conduit_transferItem_size // Conduit_transferItem_size = 0xc0 = 192;
                 )
             )
         }
@@ -512,6 +596,7 @@ contract Executor is Verifiers, TokenTransferrer {
         uint256 callDataSize
     ) internal {
         // Derive the address of the conduit using the conduit key.
+        // conduit 是我們 conduit 的 contract address
         address conduit = _deriveConduit(conduitKey);
 
         bool success;
@@ -567,10 +652,17 @@ contract Executor is Verifiers, TokenTransferrer {
         pure
         returns (bytes32 accumulatorConduitKey)
     {
+        // 0x00        0x20         0x40        0x44                            0x64
+        // +----------+------------+----------+-------------------------------+--------------+------------------------+------------------------+
+        // |  length  | conduitKey | selector | Accumulator_array_offset (20) | elements (1) | struct ConduitTransfer | struct ConduitTransfer |
+        // +----------+-----------------------+-------------------------------+--------------+------------------------+------------------------+
+
         // Retrieve the current conduit key from the accumulator.
         assembly {
+            // bytes memory accumulator 的前 32 bytes 是 length
+            // bytes memory accumulator + 0x20 就是真實內容
             accumulatorConduitKey := mload(
-                add(accumulator, Accumulator_conduitKey_ptr)
+                add(accumulator, Accumulator_conduitKey_ptr) // Accumulator_conduitKey_ptr = 0x20;
             )
         }
     }
@@ -603,25 +695,40 @@ contract Executor is Verifiers, TokenTransferrer {
         uint256 identifier,
         uint256 amount
     ) internal pure {
+        // uint256 constant AccumulatorDisarmed = 0x20;
+        // uint256 constant AccumulatorArmed = 0x40;
+        // uint256 constant Accumulator_conduitKey_ptr = 0x20;
+        // uint256 constant Accumulator_selector_ptr = 0x40;
+        // uint256 constant Accumulator_array_offset_ptr = 0x44;
+        // uint256 constant Accumulator_array_length_ptr = 0x64;
+
         uint256 elements;
         // "Arm" and prime accumulator if it's not already armed. The sentinel
         // value is held in the length of the accumulator array.
+        // uint256 constant AccumulatorDisarmed = 0x20;
         if (accumulator.length == AccumulatorDisarmed) {
             elements = 1;
             bytes4 selector = ConduitInterface.execute.selector;
             assembly {
+                // 0x00        0x20         0x40        0x44                            0x64
+                // +----------+------------+----------+-------------------------------+--------------+
+                // |  length  | conduitKey | selector | Accumulator_array_offset (20) | elements (1) |
+                // +----------+-----------------------+-------------------------------+--------------+
                 mstore(accumulator, AccumulatorArmed) // "arm" the accumulator.
                 mstore(add(accumulator, Accumulator_conduitKey_ptr), conduitKey)
                 mstore(add(accumulator, Accumulator_selector_ptr), selector)
                 mstore(
                     add(accumulator, Accumulator_array_offset_ptr),
-                    Accumulator_array_offset
+                    Accumulator_array_offset // Accumulator_array_offset = 0x20;
                 )
                 mstore(add(accumulator, Accumulator_array_length_ptr), elements)
             }
         } else {
             // Otherwise, increase the number of elements by one.
             assembly {
+                // 這邊表示已經是 AccumulatorArmed 的狀態了
+                // 也就是說, 已經是上面的 layout 圖的狀態了
+                // 所以, 就從0x64處取出element的值, +1, 放回去
                 elements := add(
                     mload(add(accumulator, Accumulator_array_length_ptr)),
                     1
@@ -631,10 +738,35 @@ contract Executor is Verifiers, TokenTransferrer {
         }
 
         // Insert the item.
+        // +-----------------------------------+
+        // | struct ConduitTransfer {          |                           
+        // +-----------------------------------+                                     
+        // |     ConduitItemType itemType;     |                               
+        // |     address token;                |                    
+        // |     address from;                 |                   
+        // |     address to;                   |                 
+        // |     uint256 identifier;           |                         
+        // |     uint256 amount;               |                     
+        // | }                                 |   
+        // +-----------------------------------+
+
+        // 0x00        0x20         0x40        0x44                            0x64
+        // +----------+------------+----------+-------------------------------+--------------+------------------------+------------------------+
+        // |  length  | conduitKey | selector | Accumulator_array_offset (20) | elements (1) | struct ConduitTransfer | struct ConduitTransfer |
+        // +----------+-----------------------+-------------------------------+--------------+------------------------+------------------------+
         assembly {
+            // 在放入 struct ConduitTransfer 之前, 要先計算出位置
+            // 每個 struct ConduitTransfer{} 的 size 為 0xc0
+            // 最後減去 60 ????
             let itemPointer := sub(
-                add(accumulator, mul(elements, Conduit_transferItem_size)),
-                Accumulator_itemSizeOffsetDifference
+                add(
+                    accumulator, 
+                    mul(
+                        elements, 
+                        Conduit_transferItem_size // Conduit_transferItem_size = 0xc0;
+                    )
+                ),
+                Accumulator_itemSizeOffsetDifference // Accumulator_itemSizeOffsetDifference = 0x3c = 60;
             )
             mstore(itemPointer, itemType)
             mstore(add(itemPointer, Conduit_transferItem_token_ptr), token)

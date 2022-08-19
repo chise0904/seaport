@@ -198,6 +198,9 @@ contract Consideration is ConsiderationInterface, OrderCombiner {
      * @param offerFulfillments         An array of FulfillmentComponent arrays
      *                                  indicating which offer items to attempt
      *                                  to aggregate when preparing executions.
+     * ex:
+     * [ [FulfillmentComponent, FulfillmentComponent], [FulfillmentComponent], [FulfillmentComponent,FulfillmentComponent,FulfillmentComponent]]
+     *
      * @param considerationFulfillments An array of FulfillmentComponent arrays
      *                                  indicating which consideration items to
      *                                  attempt to aggregate when preparing

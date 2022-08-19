@@ -18,6 +18,7 @@ import { Conduit } from "./Conduit.sol";
  */
 contract ConduitController is ConduitControllerInterface {
     // Register keys, owners, new potential owners, and channels by conduit.
+    // conduit 的 address => {key: conduitKey, owner: owner}
     mapping(address => ConduitProperties) internal _conduits;
 
     // Set conduit creation code and runtime code hashes as immutable arguments.
@@ -64,12 +65,17 @@ contract ConduitController is ConduitControllerInterface {
         }
 
         // If the first 20 bytes of the conduit key do not match the caller...
+        // conduitKey 的前20 bytes 必須是 msg.sender
         if (address(uint160(bytes20(conduitKey))) != msg.sender) {
             // Revert with an error indicating that the creator is invalid.
             revert InvalidCreator();
         }
 
         // Derive address from deployer, conduit key and creation code hash.
+        // new Conduit{ salt: conduitKey }(); 是用 CREATE2() 
+        // 由 CREATE2() 創建出來的 instance 的 address 是可預期的,
+        // 其 address 的算法就是這邊所做的
+        // 所以這邊就是在自己把 new Conduit{ salt: conduitKey }(); 所生出來的 instance 的 address 算出來
         conduit = address(
             uint160(
                 uint256(
@@ -95,6 +101,9 @@ contract ConduitController is ConduitControllerInterface {
         new Conduit{ salt: conduitKey }();
 
         // Initialize storage variable referencing conduit properties.
+        // 這邊很重要
+        // 因為 storage 不能在 runtime 中生成, 所以這邊其實會是 slot[0]
+        // 也就是對 mapping(address => ConduitProperties) internal _conduits; 進行操作
         ConduitProperties storage conduitProperties = _conduits[conduit];
 
         // Set the supplied initial owner as the owner of the conduit.
@@ -107,6 +116,7 @@ contract ConduitController is ConduitControllerInterface {
         emit NewConduit(conduit, conduitKey);
 
         // Emit an event indicating that conduit ownership has been assigned.
+        // 新建的 conduit 就會是 from 0x00 to initialOwner
         emit OwnershipTransferred(conduit, address(0), initialOwner);
     }
 
@@ -137,15 +147,37 @@ contract ConduitController is ConduitControllerInterface {
         ConduitProperties storage conduitProperties = _conduits[conduit];
 
         // Retrieve the index, if one currently exists, for the updated channel.
+        // channelIndexesPlusOne 存放的是 channel 放在 conduitProperties.channels array 中的 index
+        // 但這個 index 不是從 0 開始, 是從 1 開始
+        // 所以才會寫 PlusOne
         uint256 channelIndexPlusOne = (
             conduitProperties.channelIndexesPlusOne[channel]
         );
 
         // Determine whether the updated channel is already tracked as open.
+        // channelPreviouslyOpen 表示目前狀態是否是 open 狀態
+        // channelPreviouslyOpen 為 true, 表示 目前狀態是 open
+        // channelPreviouslyOpen 為 false, 表示 目前狀態是 closed
         bool channelPreviouslyOpen = channelIndexPlusOne != 0;
+
+        // conduitProperties.channels 是個 array
+        // +---------+---------+---------+---------+---------+
+        // |         |         |         |         |         |
+        // |  0x001  |  0x002  |  0x003  |  0x004  |  0x005  |
+        // |         |         |         |         |         |
+        // +---------+---------+---------+---------+---------+
+
+        // conduitProperties.channelIndexesPlusOne 是個 mapping
+        // 0x001 => 1
+        // 0x002 => 2
+        // 0x003 => 3
+        // 0x004 => 4
+        // 0x005 => 5
 
         // If the channel has been set to open and was previously closed...
         if (isOpen && !channelPreviouslyOpen) {
+            // isOpen 為 true, 表示 要將 channel 開啟
+            // !channelPreviouslyOpen 表示目前狀態是 closed
             // Add the channel to the channels array for the conduit.
             conduitProperties.channels.push(channel);
 
@@ -154,6 +186,47 @@ contract ConduitController is ConduitControllerInterface {
                 conduitProperties.channels.length
             );
         } else if (!isOpen && channelPreviouslyOpen) {
+            // 這邊則是要關閉channel
+
+            // conduitProperties.channels 會存放所有 channel
+            // conduitProperties.channelIndexesPlusOne 存放 channel 在 conduitProperties.channels 的位置, 但是是從1開始數
+            // 所以上面才會看到 channelIndexPlusOne 這樣的命名
+            // 要刪除的時候, 如果待刪除的channel
+
+            // conduitProperties.channels 是個 array
+            // +---------+---------+---------+---------+---------+
+            // |         |         |         |         |         |
+            // |  0x001  |  0x002  |  0x003  |  0x004  |  0x005  |
+            // |         |         |         |         |         |
+            // +---------+---------+---------+---------+---------+
+
+            // conduitProperties.channelIndexesPlusOne 是個 mapping
+            // 0x001 => 1
+            // 0x002 => 2
+            // 0x003 => 3
+            // 0x004 => 4
+            // 0x005 => 5
+
+            // 假設要刪除 channel 0x002
+            // 先從 conduitProperties.channelIndexesPlusOne 取出 0x002 在 conduitProperties.channels 的 index 
+            // 不過這個 index 要減去 1
+            // 即 removedChannelIndex = channelIndexPlusOne - 1; 做的事情
+            // 然後取出最後一個 channel 0x005
+            // 把 0x005 放到 0x002 處, 然後 POP 掉 最後一個 channel
+            //
+            // conduitProperties.channels array
+            // +---------+---------+---------+---------+
+            // |         |         |         |         |
+            // |  0x001  |  0x005  |  0x003  |  0x004  |
+            // |         |         |         |         |
+            // +---------+---------+---------+---------+
+            //
+            // conduitProperties.channelIndexesPlusOne 是個 mapping
+            // 0x001 => 1
+            // 0x005 => 2
+            // 0x003 => 3
+            // 0x004 => 4
+
             // Set a previously open channel as closed via "swap & pop" method.
             // Decrement located index to get the index of the closed channel.
             uint256 removedChannelIndex;
@@ -204,6 +277,11 @@ contract ConduitController is ConduitControllerInterface {
         external
         override
     {
+        // ConduitProperties 裡有個 owner, 用來儲存最一開始的 owner, 即 createConduit() 的參數 initialOwner
+        // 而 transferOwnership 並不是要改 ConduitProperties.owner
+        // transferOwnership 會將這個新的 owner 存在 ConduitProperties.potentialOwner
+
+
         // Ensure the caller is the current owner of the conduit in question.
         _assertCallerIsConduitOwner(conduit);
 
@@ -231,6 +309,8 @@ contract ConduitController is ConduitControllerInterface {
      * @param conduit The conduit for which to cancel ownership transfer.
      */
     function cancelOwnershipTransfer(address conduit) external override {
+        // 先看 transferOwnership()
+        // 將 ConduitProperties.potentialOwner 存的 address 刪掉而已
         // Ensure the caller is the current owner of the conduit in question.
         _assertCallerIsConduitOwner(conduit);
 
@@ -254,6 +334,11 @@ contract ConduitController is ConduitControllerInterface {
      * @param conduit The conduit for which to accept ownership.
      */
     function acceptOwnership(address conduit) external override {
+        // ConduitProperties.potentialOwner 才有權限執行這個 function
+        // 這邊就是改 ConduitProperties.owner 存的 address 了
+        // 不過, 改了 ConduitProperties.owner 以後, 會清空 ConduitProperties.potentialOwner 的值
+        // 不像 transferOwnership() 是改 ConduitProperties.potentialOwner 的值
+
         // Ensure that the conduit in question exists.
         _assertConduitExists(conduit);
 
@@ -342,6 +427,7 @@ contract ConduitController is ConduitControllerInterface {
         returns (address conduit, bool exists)
     {
         // Derive address from deployer, conduit key and creation code hash.
+        // 直接用算的算出 conduit 的 address 返回, 而不是事先存起來這個值
         conduit = address(
             uint160(
                 uint256(

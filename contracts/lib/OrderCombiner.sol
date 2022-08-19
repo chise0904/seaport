@@ -103,6 +103,15 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
      *                         transfers performed as part of matching the given
      *                         orders.
      */
+    //  _fulfillAvailableAdvancedOrders(
+    //             advancedOrders,
+    //             criteriaResolvers,
+    //             offerFulfillments,
+    //             considerationFulfillments,
+    //             fulfillerConduitKey,
+    //             recipient == address(0) ? msg.sender : recipient,
+    //             maximumFulfilled
+    //         );
     function _fulfillAvailableAdvancedOrders(
         AdvancedOrder[] memory advancedOrders,
         CriteriaResolver[] memory criteriaResolvers,
@@ -175,6 +184,7 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
         bytes32[] memory orderHashes = new bytes32[](totalOrders);
 
         // Override orderHashes length to zero after memory has been allocated.
+        // 這樣做的好處是 ????
         assembly {
             mstore(orderHashes, 0)
         }
@@ -213,8 +223,12 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
                 AdvancedOrder memory advancedOrder = advancedOrders[i];
 
                 // Determine if max number orders have already been fulfilled.
+                // 每處理完一個order就會將 maximumFulfilled--
                 if (maximumFulfilled == 0) {
                     // Mark fill fraction as zero as the order will not be used.
+                    // 既然已經到了處理上限, 剩下的order就不再fulfill了
+                    // 因為 advancedOrder.numerator 表示這次要買多少個,
+                    // 但是已經超過 maximumFulfilled 了, 代表不再買了, 就將 numerator 設置為 0 來表示不再買!
                     advancedOrder.numerator = 0;
 
                     // Update the length of the orderHashes array.
@@ -244,6 +258,7 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
                 }
 
                 // Do not track hash or adjust prices if order is not fulfilled.
+                // 這邊的 numerator 是計算後的比例
                 if (numerator == 0) {
                     // Mark fill fraction as zero if the order is not fulfilled.
                     advancedOrder.numerator = 0;
@@ -272,6 +287,14 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
                 // Read length of offer array and place on the stack.
                 uint256 totalOfferItems = offer.length;
 
+
+                // 每個 order 都有 offer 和 consideration
+                // 並且可以為每個order指定要買幾分之幾
+                // 例如
+                // seller A 提供 ERC1155 nft 100份 要換 ERC20 token 1000份
+                // 當 buyer B 只要買 1/2 的話
+                // 就會是 fulfill nft 50份 + ERC20 token 500份
+
                 // Iterate over each offer item on the order.
                 for (uint256 j = 0; j < totalOfferItems; ++j) {
                     // Retrieve the offer item.
@@ -287,6 +310,11 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
                     }
 
                     // Apply order fill fraction to offer item end amount.
+                    // 這邊先用 比例 計算出 最終的endAmount
+                    // 如果 startAmount 等於 endAmount, 那 最終的startAmount 就等於 最終的endAmount
+                    // 如果 startAmount 不等於 endAmount, 那就再另外計算 最終的startAmount
+                    // 不過 還要考慮 startTime 和 endTime
+                    // 所以 最終的startAmount 還要根據 startTime 和 endTime 的值來另外計算
                     uint256 endAmount = _getFraction(
                         numerator,
                         denominator,
@@ -334,6 +362,8 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
                         consideration[j]
                     );
 
+                    // 下面計算 startAmount 和 endAmount 和 offerItem 相似
+
                     // Apply fraction to consideration item end amount.
                     uint256 endAmount = _getFraction(
                         numerator,
@@ -371,20 +401,39 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
                         )
                     );
 
+
+
                     // Utilize assembly to manually "shift" the recipient value.
                     assembly {
                         // Write recipient to endAmount, as endAmount is not
                         // used from this point on and can be repurposed to fit
                         // the layout of a ReceivedItem.
+
+                        // struct ReceivedItem {
+                        //     ItemType itemType;          // 0x00
+                        //     address token;              // 0x20
+                        //     uint256 identifier;         // 0x40 
+                        //     uint256 amount;             // 0x60
+                        //     address payable recipient;  // 0x80
+                        // }
+
+                        // struct ConsiderationItem {
+                        //     ItemType itemType;              // 0x00
+                        //     address token;                  // 0x20
+                        //     uint256 identifierOrCriteria;   // 0x40
+                        //     uint256 startAmount;            // 0x60
+                        //     uint256 endAmount;              // 0x80
+                        //     address payable recipient;      // 0xa0
+                        // }
                         mstore(
                             add(
                                 considerationItem,
-                                ReceivedItem_recipient_offset // old endAmount
+                                ReceivedItem_recipient_offset // old endAmount // ReceivedItem_recipient_offset = 0x80;
                             ),
                             mload(
                                 add(
                                     considerationItem,
-                                    ConsiderationItem_recipient_offset
+                                    ConsiderationItem_recipient_offset // ConsiderationItem_recipient_offset = 0xa0;
                                 )
                             )
                         )
@@ -673,6 +722,7 @@ contract OrderCombiner is OrderFulfiller, FulfillmentApplier {
             ReceivedItem memory item = execution.item;
 
             // If execution transfers native tokens, reduce value available.
+            // 先檢查 mative eth 夠不夠
             if (item.itemType == ItemType.NATIVE) {
                 // Ensure that sufficient native tokens are still available.
                 if (item.amount > etherRemaining) {

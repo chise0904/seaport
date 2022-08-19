@@ -1,3 +1,11 @@
+calldata 
+
+https://ethereum.stackexchange.com/questions/67758/can-anyone-help-to-explain-calldataload
+
+
+
+
+
 ![Seaport](img/Seaport-banner.png)
 
 [![Version][version-badge]][version-link]

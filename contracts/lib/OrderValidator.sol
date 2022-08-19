@@ -131,6 +131,9 @@ contract OrderValidator is Executor, ZoneInteraction {
         }
 
         // Read numerator and denominator from memory and place on the stack.
+        //    advancedOrder.numerator
+        // ----------------------------- 是這次想買的比例
+        //   advancedOrder.denominator
         uint256 numerator = uint256(advancedOrder.numerator);
         uint256 denominator = uint256(advancedOrder.denominator);
 
@@ -149,7 +152,7 @@ contract OrderValidator is Executor, ZoneInteraction {
         }
 
         // Retrieve current counter & use it w/ parameters to derive order hash.
-        // 1. 確認 Consideration Array 的 length 是夠的
+        // 1. 確認 Consideration Array 的 length 和 totalOriginalConsiderationItems 是相同的
         // 2. 計算 order hash 並返回
         orderHash = _assertConsiderationLengthAndGetOrderHash(orderParameters);
 
@@ -191,6 +194,10 @@ contract OrderValidator is Executor, ZoneInteraction {
         }
 
         // Read filled amount as numerator and denominator and put on the stack.
+        // 已經被買掉的比例
+        //     orderStatus.numerator
+        // ----------------------------- 是已經被買掉的比例
+        //    orderStatus.denominator
         uint256 filledNumerator = orderStatus.numerator;
         uint256 filledDenominator = orderStatus.denominator;
 
@@ -245,7 +252,6 @@ contract OrderValidator is Executor, ZoneInteraction {
                 denominator *= filledDenominator;
             }
 
-            // 這邊還沒搞懂 ????
             // Once adjusted, if current+supplied numerator exceeds denominator:
             //  1          6        numerator * filledDenominator
             // ---  --->  ---  即
@@ -257,8 +263,8 @@ contract OrderValidator is Executor, ZoneInteraction {
             // ---  --->  ----  即    
             //  6          12       filledDenominator * denominator
             //
-            // 這樣 filledNumerator + numerator = 6 + 8 = 14 就大於 denominator (15)
-            // 等等會將要買的nft跟已買的nft的分子部分相加, 所以這邊先檢查是否會超過分母
+            // 這樣 filledNumerator + numerator = 6 + 8 = 14 就大於 denominator (12)
+            // 等等會將 "要買的nft" 跟 "已買的nft的分子部分" 相加, 所以這邊先檢查是否會超過分母
             if (filledNumerator + numerator > denominator) {
                 // Skip underflow check: denominator >= orderStatus.numerator
                 unchecked {

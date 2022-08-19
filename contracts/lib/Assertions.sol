@@ -74,6 +74,10 @@ contract Assertions is
      * @param originalConsiderationItemTotal The number of consideration items
      *                                       supplied on initial order creation.
      */
+    //  _assertConsiderationLengthIsNotLessThanOriginalConsiderationLength(
+    //         parameters.additionalRecipients.length,
+    //         parameters.totalOriginalAdditionalRecipients
+    //     );
     function _assertConsiderationLengthIsNotLessThanOriginalConsiderationLength(
         uint256 suppliedConsiderationItemTotal,
         uint256 originalConsiderationItemTotal

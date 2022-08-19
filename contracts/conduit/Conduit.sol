@@ -41,9 +41,11 @@ contract Conduit is ConduitInterface, TokenTransferrer {
         // Utilize assembly to access channel storage mapping directly.
         assembly {
             // Write the caller to scratch space.
+            // ChannelKey_channel_ptr = 0x00
             mstore(ChannelKey_channel_ptr, caller())
 
             // Write the storage slot for _channels to scratch space.
+            // ChannelKey_slot_ptr = 0x20;
             mstore(ChannelKey_slot_ptr, _channels.slot)
 
             // Derive the position in storage of _channels[msg.sender]
@@ -211,6 +213,15 @@ contract Conduit is ConduitInterface, TokenTransferrer {
      *      zero-amount items if that constraint is desired.
      *
      * @param item The ERC20/721/1155 item to transfer.
+     *
+        struct ConduitTransfer {
+            ConduitItemType itemType;
+            address token;
+            address from;
+            address to;
+            uint256 identifier;
+            uint256 amount;
+        }
      */
     function _transfer(ConduitTransfer calldata item) internal {
         // Determine the transfer method based on the respective item type.

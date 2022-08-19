@@ -168,6 +168,11 @@ contract FulfillmentApplier is FulfillmentApplicationErrors {
             }
 
             // If the fulfillment components are offer components...
+            // struct Execution {
+            //     ReceivedItem item;
+            //     address offerer;
+            //     bytes32 conduitKey;
+            // }
             if (side == Side.OFFER) {
                 // Set the supplied recipient on the execution item.
                 execution.item.recipient = payable(recipient);
@@ -242,34 +247,95 @@ contract FulfillmentApplier is FulfillmentApplicationErrors {
                 revert(0, Panic_error_length)
             }
 
+            // struct FulfillmentComponent {
+            //     uint256 orderIndex;
+            //     uint256 itemIndex;
+            // }
+
+            // 下圖是錯的, 我以為是這樣, 但好像不是
+            // offerComponents
+            // |
+            // |        fulfillmentHeadPtr
+            // |        |
+            // V        V
+            // +--------+----------------------+----------------------+- -+----------------------+
+            // | length | FulfillmentComponent | FulfillmentComponent | ~ | FulfillmentComponent |
+            // +--------+----------------------+----------------------+- -+----------------------+ 
+
             // Get position in offerComponents head.
             let fulfillmentHeadPtr := add(offerComponents, OneWord)
 
             // Retrieve the order index using the fulfillment pointer.
+            // 看樣子 mload(fulfillmentHeadPtr) 會拿到 FulfillmentComponent 的 pointer
+            // 取得 FulfillmentComponent 的 pointer 後, 再 mload() 就取得 orderIndex
+            // ????
+            // 取得 FulfillmentComponent 的 orderIndex
             let orderIndex := mload(mload(fulfillmentHeadPtr))
 
             // Ensure that the order index is not out of range.
+            // mload(advancedOrders) 會取得 advancedOrders[] 的 length
             if iszero(lt(orderIndex, mload(advancedOrders))) {
                 throwInvalidFulfillmentComponentData()
             }
 
             // Read advancedOrders[orderIndex] pointer from its array head.
+            // 取出一個 advancedOrder
             let orderPtr := mload(
                 // Calculate head position of advancedOrders[orderIndex].
-                add(add(advancedOrders, OneWord), mul(orderIndex, OneWord))
+                add(
+                    add(advancedOrders, OneWord),  // 指向 advancedOrders 的 data 部分
+                    mul(orderIndex, OneWord)
+                )
             )
+
+            // struct AdvancedOrder {
+            //     OrderParameters parameters;
+            //     uint120 numerator;
+            //     uint120 denominator;
+            //     bytes signature;
+            //     bytes extraData;
+            // }
+
+            // struct OrderParameters {
+            //     address offerer;                         // 0x00
+            //     address zone;                            // 0x20
+            //     OfferItem[] offer;                       // 0x40
+            //     ConsiderationItem[] consideration;       // 0x60
+            //     OrderType orderType;                     // 0x80
+            //     uint256 startTime;                       // 0xa0
+            //     uint256 endTime;                         // 0xc0
+            //     bytes32 zoneHash;                        // 0xe0
+            //     uint256 salt;                            // 0x100
+            //     bytes32 conduitKey;                      // 0x120
+            //     uint256 totalOriginalConsiderationItems; // 0x140
+            //     // offer.length                          // 0x160
+            // }
 
             // Read the pointer to OrderParameters from the AdvancedOrder.
             let paramsPtr := mload(orderPtr)
 
             // Load the offer array pointer.
             let offerArrPtr := mload(
-                add(paramsPtr, OrderParameters_offer_head_offset)
+                // add() 後 就可以取得指向 OfferItem[] offer 的 pointer
+                add( 
+                    paramsPtr, 
+                    OrderParameters_offer_head_offset // OrderParameters_offer_head_offset = 0x40;
+                ) 
             )
 
             // Retrieve item index using an offset of the fulfillment pointer.
+
+            // struct FulfillmentComponent {
+            //     uint256 orderIndex;  // 0x00
+            //     uint256 itemIndex;   // 0x20
+            // }
+
+            // 取得 FulfillmentComponent 的 itemIndex
             let itemIndex := mload(
-                add(mload(fulfillmentHeadPtr), Fulfillment_itemIndex_offset)
+                add(
+                    mload(fulfillmentHeadPtr),   // 取得指向 FulfillmentComponent pointer
+                    Fulfillment_itemIndex_offset // Fulfillment_itemIndex_offset = 0x20;
+                )
             )
 
             // Only continue if the fulfillment is not invalid.
@@ -278,6 +344,7 @@ contract FulfillmentApplier is FulfillmentApplicationErrors {
             }
 
             // Retrieve consideration item pointer using the item index.
+            // 取得 offer[itemIndex]
             let offerItemPtr := mload(
                 add(
                     // Get pointer to beginning of receivedItem.
@@ -294,8 +361,28 @@ contract FulfillmentApplier is FulfillmentApplicationErrors {
             let errorBuffer := 0
 
             // Only add offer amount to execution amount on a nonzero numerator.
-            if mload(add(orderPtr, AdvancedOrder_numerator_offset)) {
+            // struct AdvancedOrder {
+            //     OrderParameters parameters;
+            //     uint120 numerator;
+            //     uint120 denominator;
+            //     bytes signature;
+            //     bytes extraData;
+            // }
+            if mload(
+                    add(
+                        orderPtr, // advancedOrders[orderIndex]
+                        AdvancedOrder_numerator_offset // AdvancedOrder_numerator_offset = 0x20;
+                    )
+                ) {
+
                 // Retrieve amount pointer using consideration item pointer.
+                // struct OfferItem {
+                //     ItemType itemType;             // 0x00
+                //     address token;                 // 0x20
+                //     uint256 identifierOrCriteria;  // 0x40
+                //     uint256 startAmount;           // 0x40
+                //     uint256 endAmount;             // 0x40
+                // }
                 let amountPtr := add(offerItemPtr, Common_amount_offset)
 
                 // Set the amount.
